@@ -319,7 +319,7 @@ def xgb_default() -> xgb.XGBClassifier:
 
 
 def cooldown(reason: str = "", sec: int = COOLDOWN_SEC) -> None:
-    print(f"  [cooldown {sec}s] " + (reason or "발열 관리"), flush=True)
+    print(f"  [cooldown {sec}s] " + (reason or "thermal management"), flush=True)
     time.sleep(sec)
 
 
@@ -399,7 +399,7 @@ def run_sampling_comparison(X: pd.DataFrame, y: pd.Series) -> dict:
     results: dict = {}
     keys = list(samplers.keys())
     for i, name in enumerate(keys):
-        print(f"\n  [sampling] '{name}' 5-fold CV 시작 ...", flush=True)
+        print(f"\n  [sampling] '{name}' 5-fold CV starting ...", flush=True)
         results[name] = cv_oof_for_sampling(X, y, name, samplers[name])
         r = results[name]
         print(
@@ -409,7 +409,7 @@ def run_sampling_comparison(X: pd.DataFrame, y: pd.Series) -> dict:
             flush=True,
         )
         if i < len(keys) - 1:
-            cooldown(f"'{name}' 샘플링 완료, 다음 샘플링 전 대기")
+            cooldown(f"'{name}' sampling complete, waiting before next sampling")
 
     return results
 
@@ -424,7 +424,7 @@ def compute_mi(X: pd.DataFrame, y: pd.Series, subsample_size: int) -> pd.Series:
     X_sub = X.iloc[sub_idx]
     y_sub = y.iloc[sub_idx]
     print(
-        f"    MI 계산 (stratified n={n_sub:,d}, hit_rate={y_sub.mean():.4f}) ...",
+        f"    Computing MI (stratified n={n_sub:,d}, hit_rate={y_sub.mean():.4f}) ...",
         flush=True,
     )
     mi_arr = mutual_info_classif(
@@ -447,7 +447,7 @@ def feature_selection(
     Permutation Importance excluded due to macOS joblib memmap disk limitations.
     """
     print(
-        f"  RF RandomizedSearchCV 시작 "
+        f"  RF RandomizedSearchCV starting "
         f"(n_iter={RF_SEARCH_N_ITER}, cv={RF_SEARCH_CV}, n_jobs={N_JOBS_HEAVY}) ...",
         flush=True,
     )
@@ -476,7 +476,7 @@ def feature_selection(
         flush=True,
     )
 
-    cooldown("RF RandomizedSearchCV 완료, MI 전 대기")
+    cooldown("RF RandomizedSearchCV complete, waiting before MI")
 
     print("  Mutual Information ...", flush=True)
     mi = compute_mi(X, y, MI_SUBSAMPLE_SIZE)
@@ -502,7 +502,7 @@ def feature_selection(
         "mi": mi,
     }
     print(
-        f"  → 2개 기준(RF & MI) 모두 하위 {(1-drop_rank_threshold)*100:.0f}% 동시 진입 변수: {len(drop_cols)}개 제거",
+        f"  → features in bottom {(1-drop_rank_threshold)*100:.0f}% for both criteria (RF & MI): {len(drop_cols)} dropped",
         flush=True,
     )
     return (
@@ -725,7 +725,7 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
     L.append("")
 
     REPORT_PATH.write_text("\n".join(L), encoding="utf-8")
-    print(f"[report] phase2_report.md 작성 완료 → {REPORT_PATH.relative_to(ROOT)}", flush=True)
+    print(f"[report] phase2_report.md written → {REPORT_PATH.relative_to(ROOT)}", flush=True)
 
 
 # -----------------------------------------------------------------------------
@@ -733,43 +733,43 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
 # -----------------------------------------------------------------------------
 def main():
     print("=" * 80, flush=True)
-    print("Phase 2: 상관관계 분석, 스케일링, 샘플링 비교, Feature Selection (재실행)", flush=True)
+    print("Phase 2: Correlation Analysis, Scaling, Sampling Comparison, Feature Selection (re-run)", flush=True)
     print("=" * 80, flush=True)
 
     df = pd.read_parquet(INPUT_PARQUET)
     print(f"\n[load] 2024_data.parquet: {df.shape}", flush=True)
 
-    print("[build] feature matrix 구성 (encoding) ...", flush=True)
+    print("[build] building feature matrix (encoding) ...", flush=True)
     X, y = build_raw_feature_matrix(df)
     initial_n_features = X.shape[1]
-    print(f"  → 초기 X shape: {X.shape}", flush=True)
-    print(f"  → is_hit 분포: 0={int((y==0).sum()):,}  1={int((y==1).sum()):,}  hit_rate={y.mean():.4f}", flush=True)
+    print(f"  → initial X shape: {X.shape}", flush=True)
+    print(f"  → is_hit distribution: 0={int((y==0).sum()):,}  1={int((y==1).sum()):,}  hit_rate={y.mean():.4f}", flush=True)
 
     # (1) NaN imputation
-    print("\n[impute] NaN → 전체 2024 median 으로 imputation ...", flush=True)
+    print("\n[impute] NaN → imputing with full 2024 median ...", flush=True)
     numeric_cols_for_impute = [
         c for c in NUMERIC_FEATURES if c in X.columns and not c.endswith("_is_missing")
     ]
     X, medians = impute_numeric_with_median(X, numeric_cols_for_impute)
-    print(f"  → imputation 적용 컬럼 수: {len(medians)}", flush=True)
+    print(f"  → columns with imputation applied: {len(medians)}", flush=True)
 
     # (2) Robust Scaler
     print("\n[scale] Robust Scaler (numeric only, unique>2) ...", flush=True)
     scale_cols = [c for c in X.columns if X[c].nunique() > 2]
-    print(f"  → 스케일 적용 컬럼: {len(scale_cols)} / 전체 {X.shape[1]}", flush=True)
+    print(f"  → columns to scale: {len(scale_cols)} / total {X.shape[1]}", flush=True)
     scaler = RobustScaler()
     X_s = X.copy()
     X_s[scale_cols] = scaler.fit_transform(X[scale_cols])
 
     # (3) Correlation drop (|r|>0.95, domain priority)
-    print(f"\n[corr] |r| > {CORR_THRESHOLD} (Pearson) — 도메인 우선순위 drop ...", flush=True)
+    print(f"\n[corr] |r| > {CORR_THRESHOLD} (Pearson) — domain-priority drop ...", flush=True)
     drop_cols_corr, pair_log = correlation_drop_domain_priority(X_s, CORR_THRESHOLD)
-    print(f"  → 고상관 쌍 {len(pair_log)}건, 제거 변수 {len(drop_cols_corr)}개", flush=True)
+    print(f"  → high-correlation pairs: {len(pair_log)}, dropped features: {len(drop_cols_corr)}", flush=True)
     if drop_cols_corr:
-        print(f"  → 제거: {', '.join(drop_cols_corr[:8])}{', ...' if len(drop_cols_corr) > 8 else ''}", flush=True)
+        print(f"  → dropped: {', '.join(drop_cols_corr[:8])}{', ...' if len(drop_cols_corr) > 8 else ''}", flush=True)
     X_s = X_s.drop(columns=drop_cols_corr)
     final_scale_cols = [c for c in scale_cols if c in X_s.columns]
-    print(f"  → 정제 후 X shape: {X_s.shape}", flush=True)
+    print(f"  → X shape after drop: {X_s.shape}", flush=True)
 
     joblib.dump(
         {
@@ -780,17 +780,17 @@ def main():
         },
         SCALER_PATH,
     )
-    cooldown("scaling + correlation drop 완료, 샘플링 비교 전 대기")
+    cooldown("scaling + correlation drop complete, waiting before sampling comparison")
 
     # (4) Sampling comparison via 5-fold CV OOF Brier
-    print(f"\n[sampling] {CV_FOLDS}-fold CV OOF, XGBoost default, 3가지 샘플링 비교 ...", flush=True)
+    print(f"\n[sampling] {CV_FOLDS}-fold CV OOF, XGBoost default, comparing 3 sampling strategies ...", flush=True)
     sampling_results = run_sampling_comparison(X_s, y)
     best_sampling = min(sampling_results, key=lambda k: sampling_results[k]["oof_brier"])
-    print(f"\n[best] 최적 샘플링 = '{best_sampling}' (OOF Brier 기준 최소)", flush=True)
-    cooldown("샘플링 비교 완료, Feature Selection 전 대기")
+    print(f"\n[best] best sampling = '{best_sampling}' (minimum OOF Brier)", flush=True)
+    cooldown("sampling comparison complete, waiting before Feature Selection")
 
     # (5) Feature Selection on best sampled
-    print(f"\n[fs] Feature Selection 시작 (best='{best_sampling}') ...", flush=True)
+    print(f"\n[fs] Feature Selection starting (best='{best_sampling}') ...", flush=True)
     if best_sampling == "None":
         X_best, y_best = X_s, y
     elif best_sampling == "Under":
@@ -808,16 +808,16 @@ def main():
         X_best, y_best, FS_DROP_RANK_THRESHOLD
     )
     rank_df.to_csv(FS_RANK_CSV, index_label="feature")
-    print(f"  → FS ranking 저장: {FS_RANK_CSV.relative_to(ROOT)}", flush=True)
+    print(f"  → FS ranking saved: {FS_RANK_CSV.relative_to(ROOT)}", flush=True)
 
     # Finalize X_advanced
     X_advanced_final = [c for c in X_s.columns if c not in drop_cols_fs]
-    print(f"\n[final] X_advanced 최종: {len(X_advanced_final)}개 변수", flush=True)
+    print(f"\n[final] X_advanced final: {len(X_advanced_final)} features", flush=True)
 
     # Save final X (full 2024, X_advanced_final columns only)
     X_s[X_advanced_final].to_parquet(X_FULL_PARQUET, index=False)
     y.to_frame("is_hit").to_parquet(Y_FULL_PARQUET, index=False)
-    print(f"  → 저장: phase2_X_full.parquet, phase2_y_full.parquet", flush=True)
+    print(f"  → saved: phase2_X_full.parquet, phase2_y_full.parquet", flush=True)
 
     # Save metadata
     meta = {
@@ -852,12 +852,12 @@ def main():
         },
     }
     FEATURES_JSON.write_text(json.dumps(meta, indent=2, default=str, ensure_ascii=False), encoding="utf-8")
-    print(f"[save] phase2_features.json 저장 → {FEATURES_JSON.relative_to(ROOT)}", flush=True)
+    print(f"[save] phase2_features.json saved → {FEATURES_JSON.relative_to(ROOT)}", flush=True)
 
     # Report
     write_report(meta, pair_log, fs_artifacts)
 
-    print("\n[done] Phase 2 완료.", flush=True)
+    print("\n[done] Phase 2 complete.", flush=True)
 
 
 if __name__ == "__main__":

@@ -656,7 +656,7 @@ def main():
             rf_path = MODELS_DIR / "best_rf.joblib"
             if not rf_path.exists():
                 raise RuntimeError(f"RESUME mode but {rf_path} not found")
-            log(f"  ▸ [RESUME] RF best_estimator load 중: {rf_path.name} ({rf_path.stat().st_size/1024/1024:.0f}MB) ...")
+            log(f"  ▸ [RESUME] RF best_estimator loading: {rf_path.name} ({rf_path.stat().st_size/1024/1024:.0f}MB) ...")
             t0 = time.time()
             best_est = joblib.load(rf_path)
             log(f"  ▸ [RESUME] RF load done ({time.time()-t0:.1f}s)")
@@ -765,7 +765,7 @@ def main():
     }
     best_single_kind = min(base_briers, key=base_briers.get)
     log(
-        f"  (5b) Best Single 선정: '{best_single_kind.upper()}' "
+        f"  (5b) Best Single selected: '{best_single_kind.upper()}' "
         f"(OOF Brier={base_briers[best_single_kind]:.5f}; "
         f"others: " + ", ".join(f"{k.upper()}={v:.5f}" for k, v in base_briers.items()) + ")"
     )
@@ -796,24 +796,24 @@ def main():
         final_oof_brier = best_iso_brier
         if best_iso_brier <= stack_iso_brier:
             occam_verdict = (
-                f"Best_Single({best_single_kind.upper()}) + Isotonic 가 Stacking + Isotonic 보다 "
-                f"우수 (ΔBrier = {best_iso_brier - stack_iso_brier:+.5f} ≤ 0). "
-                "단순 모델이 명확히 더 우수 → 오캄의 면도날 자동 적용."
+                f"Best_Single({best_single_kind.upper()}) + Isotonic outperforms Stacking + Isotonic "
+                f"(ΔBrier = {best_iso_brier - stack_iso_brier:+.5f} ≤ 0). "
+                "Simpler model is clearly superior → Occam's razor applied automatically."
             )
         else:
             occam_verdict = (
-                f"Best_Single({best_single_kind.upper()}) + Isotonic 와 Stacking + Isotonic 의 "
-                f"차이가 ΔBrier = {best_iso_brier - stack_iso_brier:+.5f} ≤ ε({OCCAM_EPS}) "
-                "= fold 변동성 내 통계적 동률. **오캄의 면도날 적용 → 더 단순한 Best_Single + "
-                "Isotonic 선정.**"
+                f"Best_Single({best_single_kind.upper()}) + Isotonic and Stacking + Isotonic "
+                f"differ by ΔBrier = {best_iso_brier - stack_iso_brier:+.5f} ≤ ε({OCCAM_EPS}) "
+                "= statistical tie within fold variability. **Occam's razor applied → simpler Best_Single + "
+                "Isotonic selected.**"
             )
     else:
         final_choice = "Stacking + Isotonic"
         final_oof_brier = stack_iso_brier
         occam_verdict = (
-            f"Stacking + Isotonic 가 Best_Single + Isotonic 보다 ε({OCCAM_EPS})를 초과하여 "
-            f"우수 (ΔBrier = {best_iso_brier - stack_iso_brier:+.5f}). "
-            "복잡도 증가가 정당화됨 → Stacking + Isotonic 채택."
+            f"Stacking + Isotonic outperforms Best_Single + Isotonic by more than ε({OCCAM_EPS}) "
+            f"(ΔBrier = {best_iso_brier - stack_iso_brier:+.5f}). "
+            "Increased complexity is justified → Stacking + Isotonic adopted."
         )
 
     log(f"  → final selection: '{final_choice}' (OOF Brier={final_oof_brier:.5f})")

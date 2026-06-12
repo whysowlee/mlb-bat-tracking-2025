@@ -125,7 +125,7 @@ def log(msg: str) -> None:
 
 
 def cooldown(reason: str = "", sec: int = COOLDOWN_SEC) -> None:
-    log(f"  [cooldown {sec}s] {reason or '발열 관리'}")
+    log(f"  [cooldown {sec}s] {reason or 'thermal management'}")
     time.sleep(sec)
 
 
@@ -530,7 +530,7 @@ def write_report(
     L.append("")
 
     REPORT_PATH.write_text("\n".join(L), encoding="utf-8")
-    log(f"[report] phase3_report.md 작성 완료 → {REPORT_PATH.relative_to(ROOT)}")
+    log(f"[report] phase3_report.md written → {REPORT_PATH.relative_to(ROOT)}")
 
 
 # -----------------------------------------------------------------------------
@@ -538,11 +538,11 @@ def write_report(
 # -----------------------------------------------------------------------------
 def main():
     log("=" * 80)
-    log("Phase 3: 효과 분리 실험 (2×2 Factorial Ablation + 2-way ANOVA)")
+    log("Phase 3: Effect Separation Experiment (2×2 Factorial Ablation + 2-way ANOVA)")
     log("=" * 80)
 
     # 1) Load data
-    log("\n[1/5] 데이터 로드 ...")
+    log("\n[1/5] Loading data ...")
     X_full = pd.read_parquet(X_FULL_PARQUET)
     y_full = pd.read_parquet(Y_FULL_PARQUET)["is_hit"]
     feat_meta = json.loads(PHASE2_FEATURES_JSON.read_text(encoding="utf-8"))
@@ -550,41 +550,41 @@ def main():
     log(f"  best_sampling (Phase 2): {feat_meta.get('best_sampling')}")
 
     # 2) Separate feature sets
-    log("\n[2/5] 변수 셋 분리 ...")
+    log("\n[2/5] Separating feature sets ...")
     missing = [c for c in X_BASE_COLS if c not in X_full.columns]
     if missing:
-        raise RuntimeError(f"X_BASE 변수가 X_full 에 없습니다: {missing}")
+        raise RuntimeError(f"X_BASE columns not found in X_full: {missing}")
     X_base = X_full[X_BASE_COLS].copy()
     X_adv = X_full.copy()
-    log(f"  X_base    : {len(X_BASE_COLS)} 변수 = {X_BASE_COLS}")
-    log(f"  X_advanced: {X_adv.shape[1]} 변수")
+    log(f"  X_base    : {len(X_BASE_COLS)} features = {X_BASE_COLS}")
+    log(f"  X_advanced: {X_adv.shape[1]} features")
 
     # 3) CV structure (same as Phase 2)
     skf = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
 
     # 4) 4-cell × 5-fold CV evaluation
-    log(f"\n[3/5] 4 cell × {CV_FOLDS}-fold CV 평가 ...")
+    log(f"\n[3/5] 4 cell × {CV_FOLDS}-fold CV evaluation ...")
     pbar = tqdm(total=4, desc="cells", ncols=80, leave=True)
     cells: dict = {}
 
     cells["M1"] = cv_evaluate_cell("M1", "X_base", "LogReg", X_base, y_full, build_logreg, skf)
     pbar.update(1)
-    cooldown("M1 완료, M2 전 대기")
+    cooldown("M1 done, waiting before M2")
 
     cells["M2"] = cv_evaluate_cell("M2", "X_base", "XGBoost", X_base, y_full, build_xgb, skf)
     pbar.update(1)
-    cooldown("M2 완료, M3 전 대기")
+    cooldown("M2 done, waiting before M3")
 
     cells["M3"] = cv_evaluate_cell("M3", "X_advanced", "LogReg", X_adv, y_full, build_logreg, skf)
     pbar.update(1)
-    cooldown("M3 완료, M4 전 대기")
+    cooldown("M3 done, waiting before M4")
 
     cells["M4"] = cv_evaluate_cell("M4", "X_advanced", "XGBoost", X_adv, y_full, build_xgb, skf)
     pbar.update(1)
     pbar.close()
 
     # 5) Effect Decomposition + 2-way ANOVA
-    log("\n[4/5] Effect Decomposition + 2-way ANOVA ...")
+    log("\n[4/5] Effect decomposition + 2-way ANOVA ...")
     deltas = effect_decomposition(cells)
     anova_metrics = ["brier", "logloss", "roc_auc", "f1"]
     anova, df_long = run_two_way_anova(cells, anova_metrics)
@@ -603,7 +603,7 @@ def main():
     )
 
     # 6) Save artifacts
-    log("\n[5/5] 산출물 저장 ...")
+    log("\n[5/5] Saving artifacts ...")
     # Average fold sizes (for reporting)
     fold_train_sizes = []
     fold_val_sizes = []
@@ -640,7 +640,7 @@ def main():
 
     write_report(cells, deltas, anova, feat_meta, n_train_mean, n_val_mean)
 
-    log("\n[done] Phase 3 완료.")
+    log("\n[done] Phase 3 complete.")
 
 
 if __name__ == "__main__":

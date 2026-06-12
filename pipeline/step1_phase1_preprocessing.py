@@ -131,7 +131,7 @@ class Attrition:
 # 1) Load Statcast data + step-by-step cleaning
 # -----------------------------------------------------------------------------
 def load_and_clean_statcast(attrition: Attrition) -> pd.DataFrame:
-    print("[load] statcast CSV 로드 중...")
+    print("[load] loading statcast CSV...")
     df = pd.read_csv(STATCAST_CSV, low_memory=False)
     attrition.record("0. 원본 로드", df, note="2024+2025 전체 pitch 단위")
 
@@ -189,12 +189,12 @@ def merge_ballparks(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     merged = df.merge(parks, how="left", left_on="home_team", right_on="team_name")
     n_unmatched = merged["ballpark"].isna().sum()
     print(
-        f"[merge] ballparks 병합 완료. unmatched={n_unmatched:,d} "
+        f"[merge] ballparks merge complete. unmatched={n_unmatched:,d} "
         f"(unique home_team={df['home_team'].nunique()})"
     )
     if n_unmatched > 0:
         unmatched_teams = sorted(merged.loc[merged["ballpark"].isna(), "home_team"].unique())
-        raise RuntimeError(f"ballparks 미매핑 home_team 존재: {unmatched_teams}")
+        raise RuntimeError(f"unmapped home_team(s) found in ballparks: {unmatched_teams}")
     return merged, parks
 
 
@@ -285,11 +285,11 @@ def apply_dome_masking(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
     """
     if not ROOF_STATUS_CACHE_PATH.exists():
         raise FileNotFoundError(
-            f"roof_status 캐시 없음: {ROOF_STATUS_CACHE_PATH}. "
-            "먼저 `python pipeline/step1_fetch_roof_status.py` 를 실행하라."
+            f"roof_status cache not found: {ROOF_STATUS_CACHE_PATH}. "
+            "Run `python pipeline/step1_fetch_roof_status.py` first."
         )
     cache = json.loads(ROOF_STATUS_CACHE_PATH.read_text(encoding="utf-8"))
-    print(f"[dome_mask] roof_status 캐시 로드: {len(cache):,d}경기")
+    print(f"[dome_mask] roof_status cache loaded: {len(cache):,d} games")
 
     df = df.copy()
     # Convert game_pk to string to match cache keys
@@ -307,8 +307,8 @@ def apply_dome_masking(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
         df.loc[closed_mask, col] = val
 
     df = df.drop(columns=["_gpk_str"])
-    print(f"  돔 마스킹 적용: {n_masked:,d}행 / 대상 가능 {n_eligible:,d}행 "
-          f"(전체 BIP 의 {n_masked / max(len(df), 1) * 100:.2f}%)", flush=True)
+    print(f"  dome masking applied: {n_masked:,d} rows / eligible {n_eligible:,d} rows "
+          f"({n_masked / max(len(df), 1) * 100:.2f}% of total BIP)", flush=True)
     return df, n_masked, n_eligible
 
 
@@ -321,7 +321,7 @@ def merge_weather(df: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
         suffixes=("", "_wxdup"),
     )
     n_missing = merged["wx_temperature_2m"].isna().sum()
-    print(f"[merge] weather 병합 완료. 기상 결측 행={n_missing:,d}")
+    print(f"[merge] weather merge complete. missing weather rows={n_missing:,d}")
     # Drop duplicate key columns
     drop_cols = [c for c in merged.columns if c.endswith("_wxdup")] + ["date"]
     merged = merged.drop(columns=drop_cols, errors="ignore")
@@ -531,7 +531,7 @@ def write_report(
     lines.append("")
 
     REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
-    print(f"[report] phase1_report.md 작성 완료 → {REPORT_PATH.relative_to(ROOT)}")
+    print(f"[report] phase1_report.md written → {REPORT_PATH.relative_to(ROOT)}")
 
 
 # -----------------------------------------------------------------------------
@@ -539,7 +539,7 @@ def write_report(
 # -----------------------------------------------------------------------------
 def main():
     print("=" * 80)
-    print("Phase 1: 데이터 통합, 도메인 기반 전처리 및 연도별 분리")
+    print("Phase 1: Data integration, domain-driven preprocessing, and temporal split by season")
     print("=" * 80)
 
     attrition = Attrition()
@@ -570,7 +570,7 @@ def main():
 
     date_min = str(df["game_date"].min().date())
     date_max = str(df["game_date"].max().date())
-    print(f"[weather] 기상 fetch 범위: {date_min} ~ {date_max}")
+    print(f"[weather] weather fetch range: {date_min} ~ {date_max}")
     weather = build_weather_lookup(parks, date_min, date_max)
 
     df = merge_weather(df, weather)
@@ -602,7 +602,7 @@ def main():
         n_dome_eligible=n_dome_eligible,
     )
 
-    print("\n[done] Phase 1 완료.")
+    print("\n[done] Phase 1 complete.")
 
 
 if __name__ == "__main__":

@@ -93,11 +93,11 @@ def fetch_one(game_pk: int) -> dict:
 
 def main():
     log("=" * 80)
-    log("MLB Stats API roof_status fetch — retractable + dome 구장")
+    log("MLB Stats API roof_status fetch — retractable + dome ballparks")
     log("=" * 80)
 
     # 1. Collect unique target games from our dataset
-    log("\n[1/4] 우리 statcast 데이터에서 unique 게임 수집 ...")
+    log("\n[1/4] Collecting unique games from our statcast data ...")
     df = pd.read_csv(STATCAST_CSV, usecols=["game_pk", "home_team", "game_year"], low_memory=False)
 
     # Retractable-park games (to be queried via API)
@@ -106,8 +106,8 @@ def main():
         .drop_duplicates(["game_pk", "home_team", "game_year"])
         .reset_index(drop=True)
     )
-    log(f"  retractable 7 구장 unique 게임: {len(retract_games):,}건")
-    log(f"  구장×연도별 분포:")
+    log(f"  retractable 7 ballparks unique games: {len(retract_games):,}")
+    log(f"  distribution by ballpark x year:")
     log(retract_games.groupby(["home_team", "game_year"]).size().unstack(fill_value=0).to_string())
 
     # TB (full dome) — no API call needed; automatically classified as closed
@@ -116,19 +116,19 @@ def main():
         .drop_duplicates(["game_pk", "home_team", "game_year"])
         .reset_index(drop=True)
     )
-    log(f"\n  TB (완전 돔) unique 게임: {len(tb_games):,}건 (API 불필요, 자동 closed)")
+    log(f"\n  TB (full dome) unique games: {len(tb_games):,} (no API call needed, auto closed)")
 
     # 2. Load existing cache
-    log("\n[2/4] 캐시 로드 ...")
+    log("\n[2/4] Loading cache ...")
     cache: dict[str, dict] = {}
     if CACHE_PATH.exists():
         cache = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-        log(f"  기존 캐시: {len(cache):,}건")
+        log(f"  existing cache: {len(cache):,} entries")
     else:
-        log("  기존 캐시 없음 (전체 fetch 필요)")
+        log("  no existing cache (full fetch required)")
 
     # 3. Auto-register TB games
-    log("\n[3/4] TB (완전 돔) 자동 closed 등록 ...")
+    log("\n[3/4] TB (full dome) auto-registering as closed ...")
     n_tb_added = 0
     for _, r in tb_games.iterrows():
         key = str(int(r["game_pk"]))
@@ -138,16 +138,16 @@ def main():
                 "home_team": r["home_team"], "game_year": int(r["game_year"]),
             }
             n_tb_added += 1
-    log(f"  TB 자동 등록: {n_tb_added}건")
+    log(f"  TB auto-registered: {n_tb_added} entries")
 
     # 4. Fetch retractable-park games
-    log("\n[4/4] retractable 구장 API fetch ...")
+    log("\n[4/4] retractable ballpark API fetch ...")
     to_fetch = [
         (int(r["game_pk"]), r["home_team"], int(r["game_year"]))
         for _, r in retract_games.iterrows()
         if str(int(r["game_pk"])) not in cache
     ]
-    log(f"  신규 fetch 필요: {len(to_fetch):,}건 (예상 {len(to_fetch) * (REQUEST_DELAY + 0.5) / 60:.1f}분)")
+    log(f"  new fetch required: {len(to_fetch):,} games (est. {len(to_fetch) * (REQUEST_DELAY + 0.5) / 60:.1f} min)")
 
     n_closed = n_open = n_unknown = 0
     last_save = time.time()
@@ -165,11 +165,11 @@ def main():
             last_save = time.time()
 
     CACHE_PATH.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
-    log(f"\n  ✓ 신규 fetch 완료: closed={n_closed:,}  open={n_open:,}  unknown={n_unknown:,}")
-    log(f"  ✓ 캐시 저장: {CACHE_PATH.relative_to(ROOT)}")
+    log(f"\n  ✓ new fetch complete: closed={n_closed:,}  open={n_open:,}  unknown={n_unknown:,}")
+    log(f"  ✓ cache saved: {CACHE_PATH.relative_to(ROOT)}")
 
     # 5. Summary statistics
-    log("\n[summary] 전체 캐시 분포 (구장별 closed 비율) ...")
+    log("\n[summary] full cache distribution (closed ratio by ballpark) ...")
     df_cache = pd.DataFrame.from_dict(cache, orient="index")
     if "home_team" in df_cache.columns:
         summary = df_cache.groupby("home_team")["status"].value_counts(normalize=True).unstack(fill_value=0)
@@ -177,7 +177,7 @@ def main():
         log(summary.round(3).to_string())
 
     # Compare against roof ratios from ballparks.csv
-    log("\n[validation] ballparks.csv 의 roof 비율과 실측 closed 비율 비교 ...")
+    log("\n[validation] comparing roof ratio from ballparks.csv vs. observed closed ratio ...")
     parks = pd.read_csv(DATA_DIR / "ballparks.csv")
     parks_dict = dict(zip(parks["team_name"], parks["roof"]))
     for team in RETRACTABLE_TEAMS + DOME_TEAMS:
@@ -186,9 +186,9 @@ def main():
             continue
         actual_closed = (sub["status"] == "closed").mean()
         csv_roof = parks_dict.get(team, "N/A")
-        log(f"  {team:4s}: csv roof={csv_roof}  실측 closed={actual_closed:.3f}  (n={len(sub)})")
+        log(f"  {team:4s}: csv roof={csv_roof}  observed closed={actual_closed:.3f}  (n={len(sub)})")
 
-    log("\n[done] roof_status fetch 완료.")
+    log("\n[done] roof_status fetch complete.")
 
 
 if __name__ == "__main__":

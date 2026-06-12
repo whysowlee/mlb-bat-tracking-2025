@@ -273,8 +273,8 @@ def main():
 
     log("\n  ▸ Comparison with first-run (in-sample isotonic):")
     log(f"    raw                       : Brier={m_raw['brier']:.4f}  LogLoss={m_raw['log_loss']:.4f}")
-    log(f"    isotonic (in-sample, 1차) : Brier={m_insample['brier']:.4f}  LogLoss={m_insample['log_loss']:.4f}  ⚠️")
-    log(f"    isotonic (OOF, 2차 정석)   : Brier={m_oof['brier']:.4f}  LogLoss={m_oof['log_loss']:.4f}  ✓")
+    log(f"    isotonic (in-sample, 1st run) : Brier={m_insample['brier']:.4f}  LogLoss={m_insample['log_loss']:.4f}  ⚠️")
+    log(f"    isotonic (OOF, 2nd run canonical) : Brier={m_oof['brier']:.4f}  LogLoss={m_oof['log_loss']:.4f}  ✓")
 
     # 5) Save outputs + patch report
     log("\n[5/5] Saving outputs + patching report ...")

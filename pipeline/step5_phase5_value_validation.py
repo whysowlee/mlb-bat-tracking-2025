@@ -143,11 +143,11 @@ def preprocess_2025(df_2025: pd.DataFrame, features_meta: dict, scaler_obj: dict
     Key point: apply transform only (no fit) — must transform against the Phase 2 train distribution
     so that the input distribution matches Phase 4's final model (LGBM + Isotonic).
     """
-    log("\n[preprocess] 2025 데이터 전처리 — Phase 2 transform 정확 재현 ...")
+    log("\n[preprocess] Preprocessing 2025 data — exact reproduction of Phase 2 transform ...")
 
     # (1) encoding (same as step2 build_raw_feature_matrix)
     X_raw, _ = build_raw_feature_matrix(df_2025)
-    log(f"  encoding 후 shape: {X_raw.shape}")
+    log(f"  shape after encoding: {X_raw.shape}")
 
     # (2) imputation — using Phase 2 train median (decision #2 in Phase 2: train median fill)
     medians = features_meta.get("imputation_medians", {})
@@ -156,7 +156,7 @@ def preprocess_2025(df_2025: pd.DataFrame, features_meta: dict, scaler_obj: dict
         if col in X_raw.columns and X_raw[col].isna().any():
             X_raw[col] = X_raw[col].fillna(float(med))
             n_imputed += 1
-    log(f"  imputation 적용 컬럼: {n_imputed} (Phase 2 train median)")
+    log(f"  imputation applied columns: {n_imputed} (Phase 2 train median)")
 
     # (3) align one-hot columns — missing categories in 2025 data filled with 0
     scale_cols_all = scaler_obj["scale_cols_all"]
@@ -166,7 +166,7 @@ def preprocess_2025(df_2025: pd.DataFrame, features_meta: dict, scaler_obj: dict
     # (4) RobustScaler transform
     scaler = scaler_obj["scaler"]
     X_raw[scale_cols_all] = scaler.transform(X_raw[scale_cols_all])
-    log(f"  RobustScaler transform 적용 컬럼: {len(scale_cols_all)}")
+    log(f"  RobustScaler transform applied columns: {len(scale_cols_all)}")
 
     # (5) select only X_advanced_final columns (Phase 2 final 62 features)
     X_advanced_final = features_meta["X_advanced_final"]
@@ -174,12 +174,12 @@ def preprocess_2025(df_2025: pd.DataFrame, features_meta: dict, scaler_obj: dict
         if col not in X_raw.columns:
             X_raw[col] = 0.0  # fill missing one-hot columns
     X_final = X_raw[X_advanced_final].copy()
-    log(f"  X_advanced_final 선택: {X_final.shape}")
+    log(f"  X_advanced_final selected: {X_final.shape}")
 
     # Fill residual NaN with 0 (if any remain)
     n_nan = int(X_final.isna().sum().sum())
     if n_nan > 0:
-        log(f"  ⚠️ 잔여 NaN {n_nan} 개 → 0 으로 채움")
+        log(f"  ⚠️ residual NaN {n_nan} → filled with 0")
         X_final = X_final.fillna(0.0)
 
     return X_final
@@ -199,7 +199,7 @@ def predict_ca_xba(X_2025: pd.DataFrame) -> tuple[np.ndarray, dict]:
          "isotonic": <fitted IsotonicRegression>,
          "description": "..."}
     """
-    log(f"\n[predict] Phase 4 final_model 로드 + ca-xBA 산출 ...")
+    log(f"\n[predict] Loading Phase 4 final_model + computing ca-xBA ...")
     final_model = joblib.load(FINAL_MODEL)
 
     # Handle dict case — branch by type
@@ -228,7 +228,7 @@ def predict_ca_xba(X_2025: pd.DataFrame) -> tuple[np.ndarray, dict]:
             log(f"  stack raw proba: mean={raw_proba.mean():.4f}, std={raw_proba.std():.4f}")
             proba = iso.predict(raw_proba)
         else:
-            raise RuntimeError(f"final_model dict 의 알 수 없는 type: {mtype}")
+            raise RuntimeError(f"Unknown type in final_model dict: {mtype}")
     else:
         # Plain sklearn estimator (fallback)
         model_meta["type"] = "sklearn_estimator"
@@ -236,8 +236,8 @@ def predict_ca_xba(X_2025: pd.DataFrame) -> tuple[np.ndarray, dict]:
         log("  → model.predict_proba (legacy estimator)")
         proba = final_model.predict_proba(X_2025)[:, 1]
 
-    log(f"  타구별 ca-xBA 산출 완료: shape={proba.shape}")
-    log(f"  분포: mean={proba.mean():.4f}, std={proba.std():.4f}, "
+    log(f"  per-pitch ca-xBA computation complete: shape={proba.shape}")
+    log(f"  distribution: mean={proba.mean():.4f}, std={proba.std():.4f}, "
         f"min={proba.min():.4f}, max={proba.max():.4f}")
     return proba, model_meta
 
@@ -256,7 +256,7 @@ def aggregate_per_player(df_2025: pd.DataFrame, ca_xba: np.ndarray) -> pd.DataFr
         - Denominator: total BIP − events == "home_run" count
         - sac_fly is naturally included in BIP and thus in the denominator (equivalent to academic standard BABIP)
     """
-    log("\n[aggregate] 선수별 ca-xBA + BIP-only BABIP 집계 ...")
+    log("\n[aggregate] Aggregating per-player ca-xBA + BIP-only BABIP ...")
     df = df_2025[["batter", "events"]].copy()
     df["ca_xba_event"] = ca_xba
     df["is_hit_no_hr"] = df["events"].isin(["single", "double", "triple"]).astype(int)
@@ -281,12 +281,12 @@ def aggregate_per_player(df_2025: pd.DataFrame, ca_xba: np.ndarray) -> pd.DataFr
     # BIP-AVG = (hits incl. HR) / BIP — same denominator as ca-xBA (orthodox luck baseline)
     grouped["bip_avg"] = grouped["n_hit_total"] / grouped["our_bip"].clip(lower=1)
 
-    log(f"  선수 수: {len(grouped):,d}")
-    log(f"  our_bip 분포: mean={grouped['our_bip'].mean():.1f}, "
+    log(f"  player count: {len(grouped):,d}")
+    log(f"  our_bip distribution: mean={grouped['our_bip'].mean():.1f}, "
         f"min={grouped['our_bip'].min()}, max={grouped['our_bip'].max()}")
-    log(f"  BABIP 분포: mean={grouped['babip'].mean():.4f}, "
+    log(f"  BABIP distribution: mean={grouped['babip'].mean():.4f}, "
         f"std={grouped['babip'].std():.4f}")
-    log(f"  BIP-AVG 분포 (ca-xBA 분모 통일 baseline): mean={grouped['bip_avg'].mean():.4f}, "
+    log(f"  BIP-AVG distribution (unified-denominator baseline for ca-xBA): mean={grouped['bip_avg'].mean():.4f}, "
         f"std={grouped['bip_avg'].std():.4f}")
     return grouped
 
@@ -301,27 +301,27 @@ def match_and_validate(player_ca_xba: pd.DataFrame) -> tuple[pd.DataFrame, dict]
     Causes of the gap: ATH home-game exclusion + |la|>60 cutoff + key missing-value removal (Phase 1 decisions).
     Validated with "ratio >= tolerance" rather than strict equality.
     """
-    log("\n[match] expected_stats.csv 매칭 + BIP 정의 일치 assert ...")
+    log("\n[match] Matching expected_stats.csv + asserting BIP definition consistency ...")
     es = pd.read_csv(VALIDATION_GT_CSV, encoding="utf-8-sig")
     es = es.rename(columns={"player_id": "mlbam_id"})
-    log(f"  expected_stats 로드: {len(es)} 명 (PA ≥ {MIN_PA} 사전 적용)")
+    log(f"  expected_stats loaded: {len(es)} players (PA ≥ {MIN_PA} pre-applied)")
 
     merged = es.merge(player_ca_xba, on="mlbam_id", how="left", indicator=True)
     n_matched = (merged["_merge"] == "both").sum()
     n_missing = (merged["_merge"] == "left_only").sum()
-    log(f"  매칭 결과: {n_matched}/{len(es)} 명 (누락 {n_missing} 명 — 2025 데이터에 BIP 없음)")
+    log(f"  match result: {n_matched}/{len(es)} players (missing {n_missing} — no BIP in 2025 data)")
     merged = merged[merged["_merge"] == "both"].drop(columns=["_merge"]).copy()
 
     # BIP definition consistency check
     merged["bip_ratio"] = merged["our_bip"] / merged["bip"]
     violations = merged[merged["bip_ratio"] < BIP_TOLERANCE_FRACTION]
-    log(f"\n  BIP 일치 분석:")
-    log(f"    our_bip / csv.bip 비율 — mean={merged['bip_ratio'].mean():.4f}, "
+    log(f"\n  BIP consistency analysis:")
+    log(f"    our_bip / csv.bip ratio — mean={merged['bip_ratio'].mean():.4f}, "
         f"median={merged['bip_ratio'].median():.4f}, "
         f"min={merged['bip_ratio'].min():.4f}, max={merged['bip_ratio'].max():.4f}")
-    log(f"    tolerance ({BIP_TOLERANCE_FRACTION:.0%}) 미달 선수: {len(violations)} 명")
+    log(f"    players below tolerance ({BIP_TOLERANCE_FRACTION:.0%}): {len(violations)}")
     if len(violations) > 0:
-        log(f"    위반 선수 상위 5명 (ATH 홈경기 제외 영향 추정):")
+        log(f"    top 5 violating players (estimated ATH home-game exclusion effect):")
         for _, r in violations.nsmallest(5, "bip_ratio").iterrows():
             log(f"      {r['last_name, first_name']:35s} our_bip={int(r['our_bip']):4d} / "
                 f"csv.bip={int(r['bip']):4d}  ratio={r['bip_ratio']:.3f}")
@@ -329,7 +329,7 @@ def match_and_validate(player_ca_xba: pd.DataFrame) -> tuple[pd.DataFrame, dict]
     # ATH home-game exclusion effect: players with very low ratios are likely ATH roster members
     # Still included in analysis (ca-xBA computed from away-game BIPs only)
     assert merged["bip_ratio"].max() <= 1.05, \
-        "우리 BIP > csv.bip 인 선수 존재 — Phase 1 BIP 정의 불일치 가능성 (큰 문제)"
+        "Player(s) with our BIP > csv.bip detected — possible Phase 1 BIP definition mismatch (serious issue)"
 
     qc = {
         "n_expected_stats": int(len(es)),
@@ -365,7 +365,7 @@ def luck_analysis(merged: pd.DataFrame, career_babip_map: dict) -> dict:
         In baseball, a high seasonal BABIP alone does not imply "luck." True luck diagnosis requires
         **seasonal BABIP − own career BABIP** (deviation from personal baseline).
     """
-    log("\n[luck] 운(Luck) 분석 — BIP-AVG − ca-xBA (분모 통일) + 통산 BABIP 교차 검증 ...")
+    log("\n[luck] Luck analysis — BIP-AVG − ca-xBA (unified denominator) + career BABIP cross-validation ...")
     merged = merged.copy()
     # Unified-denominator luck definition — using BIP-AVG (= n_hit_total / our_bip)
     merged["luck"] = merged["bip_avg"] - merged["ca_xba"]
@@ -387,14 +387,14 @@ def luck_analysis(merged: pd.DataFrame, career_babip_map: dict) -> dict:
 
     # Career BABIP mapping success rate
     n_with_career = int(merged["career_babip"].notna().sum())
-    log(f"  통산 BABIP 매핑 성공: {n_with_career}/{len(merged)} 명")
-    log(f"  luck 분포: mean={merged['luck'].mean():+.4f}, std={merged['luck'].std():.4f}")
-    log(f"  시즌 BABIP 분포: mean={merged['babip'].mean():.4f}, std={merged['babip'].std():.4f}")
-    log(f"  통산 BABIP 분포: mean={merged['career_babip'].mean():.4f}, "
+    log(f"  career BABIP mapping success: {n_with_career}/{len(merged)} players")
+    log(f"  luck distribution: mean={merged['luck'].mean():+.4f}, std={merged['luck'].std():.4f}")
+    log(f"  seasonal BABIP distribution: mean={merged['babip'].mean():.4f}, std={merged['babip'].std():.4f}")
+    log(f"  career BABIP distribution: mean={merged['career_babip'].mean():.4f}, "
         f"std={merged['career_babip'].std():.4f}")
-    log(f"  시즌 − 통산 편차 분포: mean={merged['babip_minus_career'].mean():+.4f}, "
+    log(f"  seasonal − career deviation distribution: mean={merged['babip_minus_career'].mean():+.4f}, "
         f"std={merged['babip_minus_career'].std():.4f}")
-    log(f"  (보조) 리그 평균 BABIP (분석군, BIP-가중): {league_babip:.4f}")
+    log(f"  (supplementary) league-average BABIP (analysis group, BIP-weighted): {league_babip:.4f}")
 
     cols = [
         "mlbam_id", "last_name, first_name", "pa", "ba", "bip_avg", "ca_xba", "luck",
@@ -403,22 +403,22 @@ def luck_analysis(merged: pd.DataFrame, career_babip_map: dict) -> dict:
     top_lucky = merged.nlargest(N_LUCK_TOPN, "luck")[cols]
     top_unlucky = merged.nsmallest(N_LUCK_TOPN, "luck")[cols]
 
-    log(f"\n  🍀 운(행운 효과 가설) Top {N_LUCK_TOPN} — 통산 BABIP 대비 편차 포함:")
+    log(f"\n  🍀 Lucky (fortunate effect hypothesis) Top {N_LUCK_TOPN} — including career BABIP deviation:")
     for _, r in top_lucky.iterrows():
         cb = r["career_babip"]
         delta = r["babip_minus_career"]
         cb_str = f"{cb:.3f}" if pd.notna(cb) else "N/A"
         delta_str = f"{delta:+.3f}" if pd.notna(delta) else "N/A"
         log(f"    {r['last_name, first_name']:30s} AVG={r['ba']:.3f}  ca-xBA={r['ca_xba']:.3f}  "
-            f"luck={r['luck']:+.3f}  시즌BABIP={r['babip']:.3f}  통산BABIP={cb_str}  Δ={delta_str}")
-    log(f"\n  💀 불운(호수비·환경 손해 가설) Top {N_LUCK_TOPN}:")
+            f"luck={r['luck']:+.3f}  seasonBABIP={r['babip']:.3f}  careerBABIP={cb_str}  Δ={delta_str}")
+    log(f"\n  💀 Unlucky (stellar defense / park penalty hypothesis) Top {N_LUCK_TOPN}:")
     for _, r in top_unlucky.iterrows():
         cb = r["career_babip"]
         delta = r["babip_minus_career"]
         cb_str = f"{cb:.3f}" if pd.notna(cb) else "N/A"
         delta_str = f"{delta:+.3f}" if pd.notna(delta) else "N/A"
         log(f"    {r['last_name, first_name']:30s} AVG={r['ba']:.3f}  ca-xBA={r['ca_xba']:.3f}  "
-            f"luck={r['luck']:+.3f}  시즌BABIP={r['babip']:.3f}  통산BABIP={cb_str}  Δ={delta_str}")
+            f"luck={r['luck']:+.3f}  seasonBABIP={r['babip']:.3f}  careerBABIP={cb_str}  Δ={delta_str}")
 
     # Correlations: luck vs (seasonal BABIP), luck vs (seasonal - career BABIP delta)
     valid_career = merged.dropna(subset=["career_babip"])
@@ -430,11 +430,11 @@ def luck_analysis(merged: pd.DataFrame, career_babip_map: dict) -> dict:
     luck_delta_spearman = float(
         valid_career["luck"].corr(valid_career["babip_minus_career"], method="spearman")
     )
-    log(f"\n  luck vs 시즌 BABIP: Pearson r={luck_babip_pearson:.4f}, "
+    log(f"\n  luck vs seasonal BABIP: Pearson r={luck_babip_pearson:.4f}, "
         f"Spearman ρ={luck_babip_spearman:.4f}")
-    log(f"  luck vs (시즌 − 통산 BABIP 편차): "
+    log(f"  luck vs (seasonal − career BABIP deviation): "
         f"Pearson r={luck_delta_pearson:.4f}, Spearman ρ={luck_delta_spearman:.4f}  "
-        "← 도메인 정통 비교")
+        "← domain-orthodox comparison")
 
     return {
         "top_lucky": top_lucky.to_dict(orient="records"),
@@ -473,14 +473,14 @@ def compute_correlations(merged: pd.DataFrame) -> dict:
     ⚠️ xwOBA (est_woba) is a Statcast metric that directly predicts wOBA → tautological / mismatched scope,
     excluded from the 1:1 R² comparison (readme Phase 5 validation setup confirmed, 2026-05-29).
     """
-    log("\n[correlation] 1:1 R² 대조 — ca-xBA vs wOBA / xBA vs wOBA ...")
+    log("\n[correlation] 1:1 R² comparison — ca-xBA vs wOBA / xBA vs wOBA ...")
     results = {}
     pairs = [
-        ("ca-xBA (우리 모델)", "ca_xba", "woba"),
-        ("xBA (Statcast 공식)", "est_ba", "woba"),
+        ("ca-xBA (our model)", "ca_xba", "woba"),
+        ("xBA (Statcast official)", "est_ba", "woba"),
     ]
-    log(f"\n  대상 선수: {len(merged)} 명 (250 PA 이상 매칭)")
-    log(f"\n  {'지표':<25s} {'Pearson r':>10s} {'R²':>8s} {'Spearman ρ':>12s}")
+    log(f"\n  target players: {len(merged)} (matched with 250+ PA)")
+    log(f"\n  {'metric':<25s} {'Pearson r':>10s} {'R²':>8s} {'Spearman ρ':>12s}")
     log("  " + "-" * 60)
     for label, x_col, y_col in pairs:
         x = merged[x_col].values
@@ -507,16 +507,16 @@ def fetch_positions(mlbam_ids: list[int]) -> dict[int, str]:
 
     statsapi.mlb.com/api/v1/people/{id}/stats?stats=season&season=2025&group=fielding
     """
-    log(f"\n[positions] MLB Stats API 로 {len(mlbam_ids)} 명 포지션 조회 (캐시 활용) ...")
+    log(f"\n[positions] Querying positions for {len(mlbam_ids)} players via MLB Stats API (cache enabled) ...")
 
     # Load cache
     cache = {}
     if POSITIONS_CACHE.exists():
         cache = {int(k): v for k, v in json.loads(POSITIONS_CACHE.read_text()).items()}
-        log(f"  캐시 로드: {len(cache)} 명")
+        log(f"  cache loaded: {len(cache)} players")
 
     to_fetch = [pid for pid in mlbam_ids if pid not in cache]
-    log(f"  신규 fetch 필요: {len(to_fetch)} 명")
+    log(f"  new fetch required: {len(to_fetch)} players")
 
     if to_fetch:
         for pid in tqdm(to_fetch, desc="fetch positions", ncols=80):
@@ -545,7 +545,7 @@ def fetch_positions(mlbam_ids: list[int]) -> dict[int, str]:
 
         # Save cache
         POSITIONS_CACHE.write_text(json.dumps({str(k): v for k, v in cache.items()}, indent=2))
-        log(f"  캐시 저장 완료: {POSITIONS_CACHE.relative_to(ROOT)}")
+        log(f"  cache saved: {POSITIONS_CACHE.relative_to(ROOT)}")
 
     return {pid: cache.get(pid) for pid in mlbam_ids}
 
@@ -562,16 +562,16 @@ def fetch_career_babip(mlbam_ids: list[int]) -> dict[int, dict | None]:
 
     Returns: {pid: {"babip": float, "pa": int, "ab": int} | None}
     """
-    log(f"\n[career_babip] MLB Stats API 통산 hitting 통계 fetch ({len(mlbam_ids)} 명, 캐시 활용) ...")
+    log(f"\n[career_babip] Fetching career hitting stats via MLB Stats API ({len(mlbam_ids)} players, cache enabled) ...")
 
     cache: dict[int, dict | None] = {}
     if CAREER_BABIP_CACHE.exists():
         raw = json.loads(CAREER_BABIP_CACHE.read_text())
         cache = {int(k): v for k, v in raw.items()}
-        log(f"  캐시 로드: {len(cache)} 명")
+        log(f"  cache loaded: {len(cache)} players")
 
     to_fetch = [pid for pid in mlbam_ids if pid not in cache]
-    log(f"  신규 fetch 필요: {len(to_fetch)} 명")
+    log(f"  new fetch required: {len(to_fetch)} players")
 
     if to_fetch:
         for pid in tqdm(to_fetch, desc="fetch career BABIP", ncols=80):
@@ -608,14 +608,14 @@ def fetch_career_babip(mlbam_ids: list[int]) -> dict[int, dict | None]:
         CAREER_BABIP_CACHE.write_text(
             json.dumps({str(k): v for k, v in cache.items()}, indent=2)
         )
-        log(f"  캐시 저장: {CAREER_BABIP_CACHE.relative_to(ROOT)}")
+        log(f"  cache saved: {CAREER_BABIP_CACHE.relative_to(ROOT)}")
 
     # Statistics summary
     valid = [v for v in cache.values() if v and not (v.get("babip") != v.get("babip"))]
     if valid:
         babips = [v["babip"] for v in valid]
         log(
-            f"  통산 BABIP 통계 (n={len(babips)}): "
+            f"  career BABIP stats (n={len(babips)}): "
             f"mean={sum(babips)/len(babips):.4f}, "
             f"min={min(babips):.4f}, max={max(babips):.4f}"
         )
@@ -640,9 +640,9 @@ def silver_slugger_validation(merged: pd.DataFrame) -> tuple[pd.DataFrame, dict]
     Check whether the actual Silver Slugger winner in each position category falls within our ca-xBA Top N.
     Compute hit rate (fraction of winners who appear in Top N).
     """
-    log("\n[silver_slugger] 실버 슬러거 검증 — 포지션별 ca-xBA Top N vs 수상자 ...")
+    log("\n[silver_slugger] Silver Slugger validation — position-by-position ca-xBA Top N vs award winners ...")
     ss = pd.read_csv(SILVER_SLUGGER_CSV)
-    log(f"  실버 슬러거 명단: {len(ss)} 명")
+    log(f"  Silver Slugger roster: {len(ss)} players")
 
     # silver_slugger player_name → expected_stats 'last_name, first_name' → MLBAM ID
     es_index = {}
@@ -655,10 +655,10 @@ def silver_slugger_validation(merged: pd.DataFrame) -> tuple[pd.DataFrame, dict]
 
     ss["mlbam_id"] = ss["player_name"].str.lower().map(es_index)
     n_id_matched = ss["mlbam_id"].notna().sum()
-    log(f"  실버 슬러거 ID 매칭: {n_id_matched}/{len(ss)} 명")
+    log(f"  Silver Slugger ID match: {n_id_matched}/{len(ss)} players")
     if n_id_matched < len(ss):
         missing = ss[ss["mlbam_id"].isna()]
-        log(f"  ⚠️ 매칭 누락: {missing['player_name'].tolist()} (250 PA 미만 또는 표기 차이)")
+        log(f"  ⚠️ match missing: {missing['player_name'].tolist()} (below 250 PA or name spelling difference)")
 
     # Overall ca-xBA ranking + percentile for each winner
     merged_sorted = merged.sort_values("ca_xba", ascending=False).reset_index(drop=True)
@@ -685,13 +685,13 @@ def attach_positions_and_leaderboard(
     ss_full: pd.DataFrame, merged_sorted: pd.DataFrame, position_map: dict[int, str]
 ) -> tuple[pd.DataFrame, dict]:
     """Match position fetch results and build position-by-position Top N leaderboard."""
-    log("\n[silver_slugger] 포지션 매칭 + 포지션별 Top N 리더보드 ...")
+    log("\n[silver_slugger] Position matching + position-by-position Top N leaderboard ...")
     merged_sorted = merged_sorted.copy()
     merged_sorted["position_mlbam"] = merged_sorted["mlbam_id"].map(position_map)
 
     # Position distribution
     pos_dist = merged_sorted["position_mlbam"].value_counts(dropna=False)
-    log(f"  포지션 분포 (전체 {len(merged_sorted)} 명):")
+    log(f"  position distribution (total {len(merged_sorted)} players):")
     for pos, n in pos_dist.head(15).items():
         log(f"    {str(pos):8s}: {n}")
 
@@ -722,7 +722,7 @@ def attach_positions_and_leaderboard(
             ss_full.at[idx, "position_topN"] = rank <= POSITION_TOPN
 
     # Validation result summary
-    log(f"\n  실버 슬러거 포지션 Top {POSITION_TOPN} 적중 결과:")
+    log(f"\n  Silver Slugger position Top {POSITION_TOPN} hit results:")
     for _, r in ss_full.iterrows():
         rank = r["position_rank"]
         topN = r["position_topN"]
@@ -734,7 +734,7 @@ def attach_positions_and_leaderboard(
 
     hits = int(ss_full["position_topN"].fillna(False).sum())
     eligible = int(ss_full["position_rank"].notna().sum())
-    log(f"\n  총 적중률: {hits}/{eligible} ({hits/max(eligible, 1)*100:.1f}%)")
+    log(f"\n  overall hit rate: {hits}/{eligible} ({hits/max(eligible, 1)*100:.1f}%)")
 
     summary = {
         "hits": hits,
@@ -1063,7 +1063,7 @@ def write_report(
     L.append("")
 
     REPORT_PATH.write_text("\n".join(L), encoding="utf-8")
-    log(f"\n[report] phase5_report.md 작성 완료 → {REPORT_PATH.relative_to(ROOT)}")
+    log(f"\n[report] phase5_report.md written → {REPORT_PATH.relative_to(ROOT)}")
 
 
 # -----------------------------------------------------------------------------
@@ -1071,16 +1071,16 @@ def write_report(
 # -----------------------------------------------------------------------------
 def main():
     log("=" * 80)
-    log("Phase 5: 최종 지표(ca-xBA) 산출 및 세이버메트릭스 가치 검증")
+    log("Phase 5: Final Metric (ca-xBA) Computation and Sabermetric Value Validation")
     log("=" * 80)
 
     # 1. Load data
-    log("\n[1/9] 데이터 로드 ...")
+    log("\n[1/9] Loading data ...")
     df_2025 = pd.read_parquet(DATA_2025_PARQUET)
     features_meta = json.loads(PHASE2_FEATURES_JSON.read_text(encoding="utf-8"))
     scaler_obj = joblib.load(PHASE2_SCALER)
     log(f"  2025 BIP: {df_2025.shape}")
-    log(f"  X_advanced_final: {len(features_meta['X_advanced_final'])} 변수")
+    log(f"  X_advanced_final: {len(features_meta['X_advanced_final'])} features")
 
     # 2. Preprocess
     X_2025 = preprocess_2025(df_2025, features_meta, scaler_obj)
@@ -1114,7 +1114,7 @@ def main():
     )
 
     # Save outputs
-    log("\n[save] 산출물 저장 ...")
+    log("\n[save] Saving outputs ...")
     merged_out = merged.copy()
     merged_out["position_mlbam"] = merged_out["mlbam_id"].map(position_map)
     merged_out.to_csv(PLAYER_METRICS_CSV, index=False)
@@ -1149,7 +1149,7 @@ def main():
     write_report(qc, correlations, luck, ss_full, ss_summary, len(merged),
                  model_meta=model_meta, phase4_final_oof_brier=FINAL_MODEL_OOF_BRIER)
 
-    log("\n[done] Phase 5 완료.")
+    log("\n[done] Phase 5 complete.")
 
 
 if __name__ == "__main__":
