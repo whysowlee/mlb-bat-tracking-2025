@@ -1,0 +1,29 @@
+# ca-xBA 데이터마이닝 파이프라인 의존 패키지
+# 설치: pip install -r requirements.txt
+
+# --- 데이터 처리 ---
+numpy
+pandas
+requests              # Open-Meteo 기상 API 호출 (step1)
+
+# --- 머신러닝 ---
+scikit-learn
+imbalanced-learn      # SMOTE / RandomUnderSampler (imblearn)
+xgboost
+lightgbm
+joblib
+
+# --- 통계 ---
+scipy
+statsmodels           # 2-way ANOVA (Phase 3)
+
+# --- 시각화 ---
+matplotlib
+seaborn
+
+# --- 유틸 ---
+tqdm
+
+# --- 원본 데이터 수집(선택) ---
+# Statcast 배트 트래킹 CSV를 직접 받을 때 사용. 이미 데이터가 있으면 불필요.
+pybaseball

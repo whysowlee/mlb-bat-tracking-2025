@@ -9,6 +9,83 @@
 
 ---
 
+## 📦 데이터 준비 및 실행 (Setup)
+
+> ⚠️ **대용량 원본 데이터와 학습된 모델은 GitHub 100MB 제한으로 저장소에 포함되어 있지 않습니다.** (`.gitignore` 제외)
+> 아래 안내대로 원본 데이터를 직접 준비한 뒤 파이프라인을 순서대로 실행하면 모든 산출물이 재생성됩니다.
+
+### 1. 디렉터리 구조
+
+```
+텀프로젝트/
+├── 데이터셋/
+│   ├── statcast_bat_tracking_2024_2025.csv   ⚠️ 별도 준비 필요 (≈807MB, Git 제외)
+│   ├── ballparks.csv                         ✅ 저장소에 포함 (30개 구장 스펙)
+│   ├── silver_slugger_2025.csv               ✅ 저장소에 포함 (검증용)
+│   └── validation_2025_gt.csv                ✅ 저장소에 포함 (검증용)
+└── pipeline/
+    ├── step1_phase1_preprocessing.py … step5c_supplementary.py   # 실행 코드
+    ├── figures/   ✅ 결과 그래프 포함
+    ├── cache/     ⤵️ 실행 시 자동 생성 (Open-Meteo 기상 · roof_status 캐시)
+    ├── logs/      ⤵️ 실행 시 자동 생성
+    └── output/    ⤵️ 실행 시 자동 생성 (parquet 중간 데이터 · 학습 모델 · 결과 JSON)
+```
+
+### 2. 원본 데이터 준비 (`statcast_bat_tracking_2024_2025.csv`)
+
+2024·2025 시즌 Statcast **배트 트래킹 포함** 투구 단위(pitch-level) 데이터를 `데이터셋/` 폴더에 위 파일명으로 저장해야 합니다.
+
+**방법 A — Baseball Savant**: [baseballsavant.mlb.com/statcast_search](https://baseballsavant.mlb.com/statcast_search) 에서 2024·2025 시즌 데이터를 CSV로 내보내 두 시즌을 합칩니다.
+
+**방법 B — pybaseball로 수집** (권장):
+
+```python
+import pandas as pd
+from pybaseball import statcast
+
+df_2024 = statcast(start_dt="2024-03-20", end_dt="2024-09-30")
+df_2025 = statcast(start_dt="2025-03-18", end_dt="2025-09-28")
+
+pd.concat([df_2024, df_2025], ignore_index=True) \
+  .to_csv("데이터셋/statcast_bat_tracking_2024_2025.csv", index=False)
+```
+
+> 필요한 핵심 컬럼: `launch_speed`, `launch_angle`, `bb_type`, `events`, `bat_speed`, `swing_length`,
+> `game_pk`, `game_year`, `game_date`, `home_team`, `batter`(MLBAM ID) 등.
+> Open-Meteo 기상 데이터(8종 변수)는 step1 실행 시 API로 자동 호출·캐시되므로 별도 준비가 필요 없습니다.
+
+### 3. 실행 환경
+
+- Python 3.10+ (개발 환경: conda `mlb-xba`)
+- 패키지 설치:
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4. 파이프라인 실행 (순서대로)
+
+각 `stepN`은 이전 단계의 산출물(`pipeline/output/*.parquet` 등)에 의존하므로 **반드시 번호순으로** 실행합니다. `stepNb`는 해당 Phase의 그래프 생성 스크립트입니다.
+
+```bash
+python pipeline/step1_phase1_preprocessing.py        # Phase 1: 전처리 · 기상/구장 병합 · Temporal Split
+python pipeline/step1b_phase1_figures.py
+python pipeline/step2_phase2_correlation_sampling.py # Phase 2: 상관/스케일링/샘플링/Feature Selection
+python pipeline/step2b_phase2_figures.py
+python pipeline/step3_phase3_ablation.py             # Phase 3: Ablation(2x2 요인 설계)
+python pipeline/step3b_phase3_figures.py
+python pipeline/step4_phase4_tuning_stacking.py      # Phase 4: 튜닝 · Stacking · Calibration
+python pipeline/step4_stacking_recalib.py
+python pipeline/step4b_phase4_figures.py
+python pipeline/step5_phase5_value_validation.py     # Phase 5: ca-xBA 산출 · 세이버메트릭스 검증
+python pipeline/step5b_phase5_figures.py
+python pipeline/step5c_supplementary.py
+```
+
+> 첫 실행 시 step1이 Open-Meteo API를 호출하므로 네트워크가 필요하며 수 분이 소요될 수 있습니다(이후엔 `pipeline/cache/`에서 재사용). 각 Phase의 결과는 `pipeline/phaseN_report.md`에 기록됩니다.
+
+---
+
 ## 🗺️ 단계별 수행 로드맵 (5 Phases)
 
 본 로드맵은 데이터 누수(Data Leakage)를 완벽하게 차단하고, 야구 세이버메트릭스 철학을 반영하기 위해 **엄격한 연도별 분리(Temporal Split)**를 기반으로 수행됩니다. 본 절은 전체 흐름을 거시적으로 조망하며, 각 Phase의 세부 방법론과 통계량은 이후 본문에서 상세히 다룬다.
