@@ -1,0 +1,29 @@
+# ── OS / 에디터 ──────────────────────────────
+.DS_Store
+**/.DS_Store
+
+# ── Office 임시(잠금) 파일 ───────────────────
+~$*
+
+# ── Python ──────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# ── 대용량 원본 데이터셋 (GitHub 100MB 제한 초과) ──
+# statcast_bat_tracking_2024_2025.csv (807MB) 는 별도 보관
+데이터셋/statcast_bat_tracking_2024_2025.csv
+
+# ── 파이프라인 생성 산출물 (재현 가능 — 학습 모델/중간 데이터/캐시/로그) ──
+pipeline/output/
+pipeline/cache/
+pipeline/logs/
+
+# ── 모델 / 중간 데이터 파일 형식 (어디에 있든 제외) ──
+*.joblib
+*.parquet
+*.npy
+*.pkl

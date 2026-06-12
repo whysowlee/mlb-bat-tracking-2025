@@ -1,0 +1,77 @@
+\usepackage{kotex}
+% 한글 폰트 — Apple SD Gothic Neo (macOS 표준, 받침/jongseong 안정)
+\setmainhangulfont{Apple SD Gothic Neo}[BoldFont={* Bold}]
+\setsanshangulfont{Apple SD Gothic Neo}[BoldFont={* Bold}]
+\setmonohangulfont{Apple SD Gothic Neo}
+% 영문 폰트 — 시스템 기본 사용
+% underscore 자유 사용 (변수명 깨짐 방지)
+\usepackage[strings]{underscore}
+% 본문 줄간격 확대 — 가독성
+\usepackage{setspace}
+\onehalfspacing
+% 단락 사이 여백 + 들여쓰기 0
+\setlength{\parskip}{6pt}
+\setlength{\parindent}{0pt}
+% 목차 깊이 — N.M 까지만 (사용자 요청: 본문은 더 깊어도 됨)
+\setcounter{tocdepth}{2}
+\setcounter{secnumdepth}{4}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{colortbl}
+\usepackage{xcolor}
+\usepackage{adjustbox}
+% 모든 표에 셀 테두리 강제 (수정사항 #9 — 표 테두리)
+\setlength{\arrayrulewidth}{0.4pt}
+\renewcommand{\arraystretch}{1.18}
+% Figure/Table 캡션 스타일
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf,labelsep=period}
+% 표 폭 자동 축소 — Overfull hbox 방지
+\usepackage{ragged2e}
+% 표 전체 폰트 작게 + 셀 padding 축소
+\AtBeginEnvironment{longtable}{\scriptsize\setlength{\tabcolsep}{3pt}}
+\AtBeginEnvironment{tabular}{\scriptsize\setlength{\tabcolsep}{3pt}}
+% longtable 의 모든 줄을 자동 ragged-right 처리 — 셀 내용이 길어도 줄바꿈
+\setlength{\LTpre}{6pt}
+\setlength{\LTpost}{6pt}
+% Default column type 강화 — 모든 좌측 정렬 컬럼이 자동 줄바꿈하도록
+% (pandoc longtable 의 'l' 컬럼은 wrap 안 됨, 'p{...}' 필요)
+% → 컴파일 후 manual override 불가능하나, scriptsize 로 대부분 page width 안에 들어감
+% 이미지 자동 크기 조정 — figure 페이지당 2-3개 배치되도록 폭 축소
+\usepackage{graphicx}
+\setkeys{Gin}{width=0.72\linewidth,keepaspectratio}
+% figure float 옵션 — 본문 인접 배치 우선, page float 회피
+\usepackage{float}
+\makeatletter
+\renewcommand{\fps@figure}{!htbp}
+\makeatother
+% 수학 기호 unicode → LaTeX 명령 매핑 (pandoc 이 math mode 를 unicode 로 재변환해도 안전)
+\usepackage{newunicodechar}
+\newunicodechar{≈}{\ensuremath{\approx}}
+\newunicodechar{≥}{\ensuremath{\geq}}
+\newunicodechar{≤}{\ensuremath{\leq}}
+\newunicodechar{≠}{\ensuremath{\neq}}
+\newunicodechar{ρ}{\ensuremath{\rho}}
+\newunicodechar{ε}{\ensuremath{\varepsilon}}
+\newunicodechar{μ}{\ensuremath{\mu}}
+\newunicodechar{σ}{\ensuremath{\sigma}}
+\newunicodechar{β}{\ensuremath{\beta}}
+\newunicodechar{α}{\ensuremath{\alpha}}
+\newunicodechar{γ}{\ensuremath{\gamma}}
+\newunicodechar{Δ}{\ensuremath{\Delta}}
+\newunicodechar{∈}{\ensuremath{\in}}
+\newunicodechar{∉}{\ensuremath{\notin}}
+\newunicodechar{∞}{\ensuremath{\infty}}
+\newunicodechar{±}{\ensuremath{\pm}}
+\newunicodechar{→}{\ensuremath{\rightarrow}}
+\newunicodechar{←}{\ensuremath{\leftarrow}}
+\newunicodechar{↑}{\ensuremath{\uparrow}}
+\newunicodechar{↓}{\ensuremath{\downarrow}}
+\newunicodechar{·}{\ensuremath{\cdot}}
+\newunicodechar{×}{\ensuremath{\times}}
+\newunicodechar{÷}{\ensuremath{\div}}
+\newunicodechar{²}{\ensuremath{{}^2}}
+\newunicodechar{³}{\ensuremath{{}^3}}
+\newunicodechar{°}{\ensuremath{^\circ}}
