@@ -1,30 +1,33 @@
 """
-Phase 4: 하이퍼파라미터 튜닝 + Stacking + Calibration
-=====================================================
+Phase 4: Hyperparameter Tuning + Stacking + Calibration
+========================================================
 
-새 구조 (Phase 2 dome-masking + best_sampling=None 기반):
+New structure (based on Phase 2 dome-masking + best_sampling=None):
 
-작업 흐름:
-  1) phase2_X_full + phase2_y_full 로드 (61 feat × 113,409 row)
-  2) **3 base 모델 튜닝**: RF / XGBoost / LightGBM 각각
+Workflow:
+  1) Load phase2_X_full + phase2_y_full (61 features × 113,409 rows)
+  2) **Tune 3 base models**: RF / XGBoost / LightGBM each via
      RandomizedSearchCV(n_iter=30, cv=5, scoring='neg_brier_score', refit=True)
-  3) 각 best_estimator_ 를 **외부 5-fold CV (Phase 2/3 동일 splits)** 위에서
-     OOF predict_proba 산출 → Brier / LogLoss / F1 / AUC / P / R / Acc 평가
+  3) For each best_estimator_, compute OOF predict_proba over
+     **outer 5-fold CV (same splits as Phase 2/3)**
+     → evaluate Brier / LogLoss / F1 / AUC / P / R / Acc
   4) **Stacking**: StackingClassifier(
         estimators=[best_rf, best_xgb, best_lgbm],
         final_estimator=LogisticRegression(C=1.0, solver='lbfgs', max_iter=2000),
         cv=5, n_jobs=N_JOBS)
-     를 외부 5-fold CV 로 평가 (각 fold 안에서 base 3개 fit + meta fit)
+     evaluated via outer 5-fold CV (each fold: fit 3 base + fit meta)
   5) **Isotonic Calibration**: CalibratedClassifierCV(stacking, method='isotonic', cv=5)
-     → OOF proba 기반 calibration, Brier 추가 개선
-  6) Brier 최소값 모델을 **최종 ca-xBA 산출 모델**로 선정 → Phase 5 에서 2025 예측
-  7) phase4_report.md + phase4_results.json + best model joblib 저장
+     → OOF proba-based calibration, additional Brier improvement
+  6) Model with minimum Brier selected as **final ca-xBA output model**
+     → used for 2025 predictions in Phase 5
+  7) Save phase4_report.md + phase4_results.json + best model joblib
 
-샘플링: Phase 2 결정 = `None` (원본 분포 유지) → Pipeline 에 sampler 없음.
+Sampling: Phase 2 decision = `None` (preserve original distribution)
+          → no sampler in Pipeline.
 
-쿨다운: COOLDOWN_SEC=120 (사용자 명시 — 과열 방지). n_jobs=2 유지.
+Cooldown: COOLDOWN_SEC=120 (user-specified — overheat prevention). n_jobs=2.
 
-실행:
+Run:
     PYTHONUNBUFFERED=1 /opt/miniconda3/envs/mlb-xba/bin/python \\
         pipeline/step4_phase4_tuning_stacking.py
 """
@@ -64,7 +67,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 # -----------------------------------------------------------------------------
-# 경로
+# Paths
 # -----------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_DIR = ROOT / "pipeline"
@@ -83,18 +86,18 @@ PHASE3_RESULTS_JSON = OUTPUT_DIR / "phase3_results.json"
 
 
 # -----------------------------------------------------------------------------
-# 결정 상수 (사용자 컨펌)
+# Decision constants (user-confirmed)
 # -----------------------------------------------------------------------------
 RANDOM_STATE = 42
-CV_FOLDS = 5         # Phase 2/3 동일 외부 CV
-N_ITER = 30          # RandomizedSearchCV 후보 수
-INNER_CV = 5         # RandomizedSearchCV 내부 CV
+CV_FOLDS = 5         # outer CV identical to Phase 2/3
+N_ITER = 30          # number of RandomizedSearchCV candidates
+INNER_CV = 5         # inner CV for RandomizedSearchCV
 SCORING = "neg_brier_score"
 REFIT = True
 THRESHOLD = 0.5
 
 N_JOBS = 2
-COOLDOWN_SEC = 120   # M2 Air 발열 — 사용자 명시 (Phase 3 의 60s 보다 길게)
+COOLDOWN_SEC = 120   # M2 Air thermal management — user-specified (longer than Phase 3's 60s)
 
 # Calibration
 CALIBRATION_METHOD = "isotonic"
@@ -104,7 +107,7 @@ CALIBRATION_CV = 5
 STACKING_CV = 5
 STACKING_FINAL_LABEL = "LogisticRegression(C=1.0, solver='lbfgs', max_iter=2000)"
 
-# 탐색 공간 (이전 검증된 공간 + 약간 축소: 신뢰도 우선)
+# Search space (previously validated space, slightly narrowed: reliability first)
 RF_SEARCH_SPACE = {
     "n_estimators": [100, 200, 300, 500],
     "max_depth": [10, 15, 20, None],
@@ -141,14 +144,14 @@ METRIC_KEYS = [
 
 
 # -----------------------------------------------------------------------------
-# 유틸
+# Utilities
 # -----------------------------------------------------------------------------
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
 def cooldown(reason: str = "", sec: int = COOLDOWN_SEC) -> None:
-    log(f"  [cooldown {sec}s] {reason or '발열 관리'}")
+    log(f"  [cooldown {sec}s] {reason or 'thermal management'}")
     time.sleep(sec)
 
 
@@ -194,7 +197,7 @@ def log_metrics(label: str, m: dict):
 
 
 # -----------------------------------------------------------------------------
-# (1) base 모델 튜닝 — RandomizedSearchCV
+# (1) Base model tuning — RandomizedSearchCV
 # -----------------------------------------------------------------------------
 def tune_base(kind: str, space: dict, X: pd.DataFrame, y: pd.Series) -> dict:
     log(
@@ -212,7 +215,7 @@ def tune_base(kind: str, space: dict, X: pd.DataFrame, y: pd.Series) -> dict:
         n_jobs=N_JOBS,
         random_state=RANDOM_STATE,
         refit=REFIT,
-        verbose=10,  # candidate 시작/완료마다 출력 (사용자 요청: 자주 갱신)
+        verbose=10,  # print on each candidate start/finish (user request: frequent updates)
     )
     t0 = time.time()
     search.fit(X, y)
@@ -235,7 +238,7 @@ def tune_base(kind: str, space: dict, X: pd.DataFrame, y: pd.Series) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# (2) 외부 5-fold CV OOF 평가
+# (2) Outer 5-fold CV OOF evaluation
 # -----------------------------------------------------------------------------
 def outer_cv_oof(
     label: str,
@@ -244,18 +247,18 @@ def outer_cv_oof(
     y: pd.Series,
     skf: StratifiedKFold,
 ) -> tuple[dict, np.ndarray, list[dict]]:
-    """주어진 estimator_factory() 를 fold 마다 새로 fit, OOF predict_proba 수집."""
+    """Re-fit estimator_factory() from scratch for each fold; collect OOF predict_proba."""
     log(f"\n  ▸ Outer {CV_FOLDS}-fold CV OOF — {label}")
     oof_proba = np.zeros(len(y), dtype=np.float64)
     fold_records: list[dict] = []
     for fold_idx, (tr_idx, val_idx) in enumerate(skf.split(X, y), 1):
         X_tr, X_val = X.iloc[tr_idx], X.iloc[val_idx]
         y_tr, y_val = y.iloc[tr_idx], y.iloc[val_idx]
-        log(f"    [fold {fold_idx}/{CV_FOLDS}] 시작 — train n={len(tr_idx):,}, val n={len(val_idx):,}, fit 중...")
+        log(f"    [fold {fold_idx}/{CV_FOLDS}] start — train n={len(tr_idx):,}, val n={len(val_idx):,}, fitting...")
         t0 = time.time()
         model = estimator_factory()
         model.fit(X_tr, y_tr)
-        log(f"    [fold {fold_idx}/{CV_FOLDS}] fit 완료 ({time.time() - t0:.1f}s), predict_proba 중...")
+        log(f"    [fold {fold_idx}/{CV_FOLDS}] fit done ({time.time() - t0:.1f}s), running predict_proba...")
         proba = model.predict_proba(X_val)[:, 1]
         oof_proba[val_idx] = proba
         m = metrics_from_proba(y_val, proba)
@@ -284,7 +287,7 @@ def outer_cv_oof(
 # (3) Stacking
 # -----------------------------------------------------------------------------
 def build_stacking_estimator(tuned: dict) -> StackingClassifier:
-    """튜닝된 best_estimator_ 3개를 base 로 StackingClassifier 구성."""
+    """Build a StackingClassifier using the 3 tuned best_estimator_ objects as bases."""
     base_estimators = [
         ("rf", tuned["rf"]["best_estimator"]),
         ("xgb", tuned["xgb"]["best_estimator"]),
@@ -299,14 +302,14 @@ def build_stacking_estimator(tuned: dict) -> StackingClassifier:
         cv=STACKING_CV,
         n_jobs=N_JOBS,
         passthrough=False,
-        verbose=2,  # 내부 cross_val_predict 진행 출력
+        verbose=2,  # print internal cross_val_predict progress
     )
 
 
 def stacking_oof(
     tuned: dict, X: pd.DataFrame, y: pd.Series, skf: StratifiedKFold
 ) -> tuple[dict, np.ndarray]:
-    """Outer CV: fold 마다 새 StackingClassifier 만들고 fit → val proba."""
+    """Outer CV: build a fresh StackingClassifier per fold, fit → val proba."""
     def factory():
         return build_stacking_estimator(tuned)
 
@@ -320,17 +323,18 @@ def isotonic_post_processing_oof(
     label: str = "Stacking + Isotonic (cv='prefit')",
 ) -> tuple[dict, np.ndarray]:
     """
-    C 옵션 — `cv='prefit'` 패턴:
-    임의 모델의 5-fold OOF predict_proba 위에 IsotonicRegression 을 5-fold OOF 로 fit.
+    Option C — `cv='prefit'` pattern:
+    Fit IsotonicRegression via 5-fold OOF on top of any model's 5-fold OOF predict_proba.
 
-    - 추가 base/meta 학습 없음 (OOF proba 재사용)
-    - 학술적으로 `CalibratedClassifierCV(estimator, method='isotonic', cv=K)` 내부 로직과 동일
-    - 시간: ~5초
+    - No additional base/meta training (reuses OOF proba)
+    - Academically equivalent to the internals of
+      `CalibratedClassifierCV(estimator, method='isotonic', cv=K)`
+    - Runtime: ~5 seconds
     """
     log(f"\n  ▸ Outer {CV_FOLDS}-fold OOF Isotonic post-processing — {label}")
     iso_oof_proba = np.zeros(len(y), dtype=np.float64)
     fold_records: list[dict] = []
-    # IsotonicRegression 는 1D 입력 → split 용 X 는 dummy 2D 배열
+    # IsotonicRegression takes 1D input → use a dummy 2D array for splitting
     dummy_X = stack_oof_proba.reshape(-1, 1)
     for fold_idx, (tr_idx, val_idx) in enumerate(skf.split(dummy_X, y), 1):
         log(f"    [fold {fold_idx}/{CV_FOLDS}] IsotonicRegression fit (n_train={len(tr_idx):,}, n_val={len(val_idx):,}) ...")
@@ -360,14 +364,14 @@ def isotonic_post_processing_oof(
 
 
 def reconstruct_oof_result(label: str, oof_proba: np.ndarray, y: pd.Series, skf: StratifiedKFold) -> dict:
-    """RESUME 모드용 — 저장된 oof_proba 만으로 oof_metrics + fold_records 재구성."""
+    """For RESUME mode — reconstruct oof_metrics + fold_records from saved oof_proba alone."""
     fold_records: list[dict] = []
     dummy_X = oof_proba.reshape(-1, 1)
     for fold_idx, (tr_idx, val_idx) in enumerate(skf.split(dummy_X, y), 1):
         proba = oof_proba[val_idx]
         m = metrics_from_proba(y.iloc[val_idx], proba)
         m["fold"] = fold_idx
-        m["fit_sec"] = float("nan")  # 재구성이라 측정 불가
+        m["fit_sec"] = float("nan")  # not measurable in reconstruction mode
         fold_records.append(m)
     oof_metrics = metrics_from_proba(y, oof_proba)
     fold_mean = {k: float(np.mean([r[k] for r in fold_records])) for k in METRIC_KEYS}
@@ -382,7 +386,7 @@ def reconstruct_oof_result(label: str, oof_proba: np.ndarray, y: pd.Series, skf:
 
 
 # -----------------------------------------------------------------------------
-# 리포트 작성
+# Report writing
 # -----------------------------------------------------------------------------
 def write_report(
     tuned: dict,
@@ -416,7 +420,7 @@ def write_report(
     )
     L.append("")
 
-    # 1. 결정 사항
+    # 1. Decisions
     L.append("## 1. 결정 사항 (사용자 컨펌 — Phase 1 dome-masking 이후 분기 전수 재확인)")
     L.append("")
     L.append("| # | 결정 항목 | 채택안 | 사유 |")
@@ -445,7 +449,7 @@ def write_report(
     L.append(f"| 10 | M2 발열 관리 | COOLDOWN_SEC={COOLDOWN_SEC}s, N_JOBS={N_JOBS} | Phase 3 의 60s 보다 더 긴 쿨다운 (사용자 명시 — 과열 방지). |")
     L.append("")
 
-    # 2. base 튜닝 결과 (fit time 열 제거 — RESUME 모드에서 nan 표시 방지)
+    # 2. Base tuning results (fit time column omitted — avoids nan display in RESUME mode)
     L.append("## 2. Base 모델 튜닝 결과 (RandomizedSearchCV)")
     L.append("")
     L.append(f"각 모델 RandomizedSearchCV: n_iter={N_ITER}, inner_cv={INNER_CV}, "
@@ -461,7 +465,7 @@ def write_report(
         L.append(f"| **{kind.upper()}** | {cv_brier_str} | {params_str} |")
     L.append("")
 
-    # 3. 외부 CV OOF 결과
+    # 3. Outer CV OOF results
     L.append(f"## 3. Outer {CV_FOLDS}-fold CV OOF 결과")
     L.append("")
     L.append("**OOF aggregate:**")
@@ -490,7 +494,7 @@ def write_report(
         )
     L.append("")
 
-    # 4. Phase 3 baseline 대비 개선
+    # 4. Improvement over Phase 3 baseline
     L.append("## 4. Phase 3 baseline (M4=X_advanced+XGB default) 대비 개선")
     L.append("")
     m4_metrics = next(iter([
@@ -511,7 +515,7 @@ def write_report(
         L.append(f"_M4 (Phase 3): Brier={m4_brier:.5f}, AUC={m4_auc:.4f}_")
         L.append("")
 
-    # 5. 최종 모델 선정 (오캄의 면도날)
+    # 5. Final model selection (Occam's Razor)
     L.append("## 5. 최종 모델 선정 — 오캄의 면도날 (Occam's Razor) 적용")
     L.append("")
     L.append("### 5.1 핵심 후보 3종 OOF Brier 비교")
@@ -580,7 +584,7 @@ def write_report(
     )
     L.append("")
 
-    # 6. 산출물
+    # 6. Outputs
     L.append("## 6. 산출물")
     L.append("")
     L.append(
@@ -593,7 +597,7 @@ def write_report(
     L.append("")
 
     REPORT_PATH.write_text("\n".join(L), encoding="utf-8")
-    log(f"[report] phase4_report.md 작성 완료 → {REPORT_PATH.relative_to(ROOT)}")
+    log(f"[report] phase4_report.md written → {REPORT_PATH.relative_to(ROOT)}")
 
 
 # -----------------------------------------------------------------------------
@@ -601,11 +605,11 @@ def write_report(
 # -----------------------------------------------------------------------------
 def main():
     log("=" * 80)
-    log("Phase 4: 하이퍼파라미터 튜닝 + Stacking + Isotonic Calibration")
+    log("Phase 4: Hyperparameter Tuning + Stacking + Isotonic Calibration")
     log("=" * 80)
 
-    # 1) 데이터 로드
-    log("\n[1/8] 데이터 로드 ...")
+    # 1) Load data
+    log("\n[1/8] Loading data ...")
     X_full = pd.read_parquet(X_FULL_PARQUET)
     y_full = pd.read_parquet(Y_FULL_PARQUET)["is_hit"]
     meta_phase2 = json.loads(PHASE2_FEATURES_JSON.read_text(encoding="utf-8"))
@@ -615,19 +619,19 @@ def main():
 
     skf = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
 
-    # 2) base 모델 튜닝
-    log("\n[2/8] Base 모델 튜닝 (RandomizedSearchCV) ...")
+    # 2) Base model tuning
+    log("\n[2/8] Base model tuning (RandomizedSearchCV) ...")
     resume_from_rf = os.environ.get("RESUME_FROM_RF", "0") == "1"
     resume_from_stacking = os.environ.get("RESUME_FROM_STACKING", "0") == "1"
     tuned: dict = {}
     if resume_from_stacking:
-        # 가장 진보된 RESUME — RF/XGB/LGBM/Stacking outer CV 모두 skip
-        log("  [RESUME_FROM_STACKING=1] base 튜닝 + base outer CV + Stacking outer CV 모두 skip")
-        log("  → 저장된 best_*.joblib + oof_*.npy 모두 로드, [5/8] Isotonic 부터 시작")
+        # Most advanced RESUME — skip RF/XGB/LGBM/Stacking outer CV entirely
+        log("  [RESUME_FROM_STACKING=1] skipping base tuning + base outer CV + Stacking outer CV")
+        log("  → loading all saved best_*.joblib + oof_*.npy, resuming from [5/8] Isotonic")
         for kind in ["rf", "xgb", "lgbm"]:
             path = MODELS_DIR / f"best_{kind}.joblib"
             if not path.exists():
-                raise RuntimeError(f"RESUME_FROM_STACKING 모드인데 {path} 가 없음")
+                raise RuntimeError(f"RESUME_FROM_STACKING mode but {path} not found")
             best_est = joblib.load(path)
             tuned[kind] = {
                 "kind": kind,
@@ -640,22 +644,22 @@ def main():
                 "best_estimator": best_est,
             }
             log(f"  [RESUME] loaded best_{kind}.joblib ({path.stat().st_size/1024/1024:.0f}MB)")
-        # 다음 단계 (base outer CV) 도 skip — main 흐름에서 분기 처리
+        # Next step (base outer CV) is also skipped — handled by branching in main flow
     elif resume_from_rf:
-        log("  [RESUME_FROM_RF=1] RF 튜닝 단계 skip — 저장된 best_rf.joblib + 알려진 결과 사용")
+        log("  [RESUME_FROM_RF=1] skipping RF tuning — using saved best_rf.joblib + known results")
     spaces = {"rf": RF_SEARCH_SPACE, "xgb": XGB_SEARCH_SPACE, "lgbm": LGBM_SEARCH_SPACE}
     if resume_from_stacking:
-        # base 튜닝 루프 전체 skip (위에서 이미 모두 로드함)
+        # Skip entire base tuning loop (already fully loaded above)
         spaces = {}
     for i, (kind, space) in enumerate(spaces.items()):
         if kind == "rf" and resume_from_rf:
             rf_path = MODELS_DIR / "best_rf.joblib"
             if not rf_path.exists():
-                raise RuntimeError(f"RESUME 모드인데 {rf_path} 가 없음")
+                raise RuntimeError(f"RESUME mode but {rf_path} not found")
             log(f"  ▸ [RESUME] RF best_estimator load 중: {rf_path.name} ({rf_path.stat().st_size/1024/1024:.0f}MB) ...")
             t0 = time.time()
             best_est = joblib.load(rf_path)
-            log(f"  ▸ [RESUME] RF load 완료 ({time.time()-t0:.1f}s)")
+            log(f"  ▸ [RESUME] RF load done ({time.time()-t0:.1f}s)")
             tuned["rf"] = {
                 "kind": "rf",
                 "best_params": {
@@ -671,9 +675,9 @@ def main():
                 "best_estimator": best_est,
             }
             log(f"  ▸ [RESUME] RF best_params: {tuned['rf']['best_params']}")
-            log(f"  ▸ [RESUME] RF best CV Brier: {tuned['rf']['best_cv_brier']:.5f} (이전 실행 결과)")
+            log(f"  ▸ [RESUME] RF best CV Brier: {tuned['rf']['best_cv_brier']:.5f} (from prior run)")
             if i < len(spaces) - 1:
-                cooldown(f"RF skip 완료, 다음 모델 전 대기 (단축)", sec=10)
+                cooldown(f"RF skip done, brief wait before next model", sec=10)
             continue
         tuned[kind] = tune_base(kind, space, X_full, y_full)
         joblib.dump(
@@ -682,27 +686,27 @@ def main():
         )
         log(f"  → saved: best_{kind}.joblib")
         if i < len(spaces) - 1:
-            cooldown(f"{kind.upper()} 튜닝 완료, 다음 모델 전 대기")
+            cooldown(f"{kind.upper()} tuning done, waiting before next model")
 
     if not resume_from_stacking:
-        cooldown("base 모델 튜닝 완료, 외부 CV OOF 평가 전 대기")
+        cooldown("base model tuning done, waiting before outer CV OOF evaluation")
 
-    # 3) 외부 CV OOF — base 3 모델
+    # 3) Outer CV OOF — 3 base models
     oof_results: dict = {}
     stack_proba: np.ndarray  # type hint
 
     if resume_from_stacking:
-        log(f"\n[3/8] Outer CV OOF — base 3 모델 [RESUME: oof_*.npy 로드 + 재구성] ...")
+        log(f"\n[3/8] Outer CV OOF — base 3 models [RESUME: load oof_*.npy + reconstruct] ...")
         for kind in ["rf", "xgb", "lgbm"]:
             npy_path = PROBA_DIR / f"oof_{kind}.npy"
             if not npy_path.exists():
-                raise RuntimeError(f"RESUME 모드인데 {npy_path} 가 없음")
+                raise RuntimeError(f"RESUME mode but {npy_path} not found")
             proba = np.load(npy_path)
             label = f"{kind.upper()} (tuned)"
             oof_results[label] = reconstruct_oof_result(label, proba, y_full, skf)
             log(f"  [RESUME] {label} OOF Brier = {oof_results[label]['oof_metrics']['brier']:.5f}")
     else:
-        log(f"\n[3/8] Outer {CV_FOLDS}-fold CV OOF — base 3 모델 ...")
+        log(f"\n[3/8] Outer {CV_FOLDS}-fold CV OOF — 3 base models ...")
         for i, kind in enumerate(["rf", "xgb", "lgbm"]):
             params = tuned[kind]["best_params"]
             def make_factory(_kind=kind, _params=params):
@@ -718,16 +722,16 @@ def main():
             np.save(PROBA_DIR / f"oof_{kind}.npy", proba)
             log(f"  → saved: oof_{kind}.npy")
             if i < 2:
-                cooldown(f"{kind.upper()} outer OOF 완료, 다음 모델 전 대기")
+                cooldown(f"{kind.upper()} outer OOF done, waiting before next model")
 
-        cooldown("base 3 모델 OOF 완료, Stacking 전 대기")
+        cooldown("3 base model OOF done, waiting before Stacking")
 
     # 4) Stacking
     if resume_from_stacking:
-        log(f"\n[4/8] Stacking OOF [RESUME: oof_stacking.npy 로드] ...")
+        log(f"\n[4/8] Stacking OOF [RESUME: loading oof_stacking.npy] ...")
         npy_path = PROBA_DIR / "oof_stacking.npy"
         if not npy_path.exists():
-            raise RuntimeError(f"RESUME 모드인데 {npy_path} 가 없음")
+            raise RuntimeError(f"RESUME mode but {npy_path} not found")
         stack_proba = np.load(npy_path)
         stack_result = reconstruct_oof_result("Stacking (LR meta)", stack_proba, y_full, skf)
         oof_results["Stacking (LR meta)"] = stack_result
@@ -738,11 +742,11 @@ def main():
         oof_results["Stacking (LR meta)"] = stack_result
         np.save(PROBA_DIR / "oof_stacking.npy", stack_proba)
         log("  → saved: oof_stacking.npy")
-        cooldown("Stacking OOF 완료, Isotonic post-processing 전 대기")
+        cooldown("Stacking OOF done, waiting before Isotonic post-processing")
 
-    # 5) Isotonic post-processing — Stacking + Isotonic / Best_Single + Isotonic (둘 다)
-    #    C 옵션 (cv='prefit' 패턴), 각 ~수초
-    log(f"\n[5/8] Isotonic post-processing (C 옵션, cv='prefit' 패턴) ...")
+    # 5) Isotonic post-processing — Stacking + Isotonic / Best_Single + Isotonic (both)
+    #    Option C (cv='prefit' pattern), each ~seconds
+    log(f"\n[5/8] Isotonic post-processing (option C, cv='prefit' pattern) ...")
 
     # (5a) Stacking + Isotonic
     log("  (5a) Stacking + Isotonic")
@@ -754,7 +758,7 @@ def main():
     log("  → saved: oof_stacking_isotonic.npy")
 
     # (5b) Best_Single + Isotonic
-    #      base 3개 중 OOF Brier 최소값을 가진 base 선정 → 그 OOF proba 위에 isotonic
+    #      Select the base with minimum OOF Brier among the 3 → apply isotonic on its OOF proba
     base_briers = {
         kind: oof_results[f"{kind.upper()} (tuned)"]["oof_metrics"]["brier"]
         for kind in ["rf", "xgb", "lgbm"]
@@ -773,10 +777,10 @@ def main():
     oof_results[best_single_iso_label] = best_iso_result
     np.save(PROBA_DIR / f"oof_{best_single_kind}_isotonic.npy", best_iso_proba)
     log(f"  → saved: oof_{best_single_kind}_isotonic.npy")
-    cooldown("Isotonic post-processing 완료, 최종 모델 선정 전 대기", sec=10)
+    cooldown("Isotonic post-processing done, waiting before final model selection", sec=10)
 
-    # 6) 최종 모델 선정 — 오캄의 면도날 (ΔBrier ≤ 0.001 동률 시 단순 모델 선호)
-    log("\n[6/8] 최종 모델 선정 (오캄의 면도날 + OOF Brier 최소) ...")
+    # 6) Final model selection — Occam's Razor (prefer simpler model when ΔBrier ≤ 0.001)
+    log("\n[6/8] Final model selection (Occam's Razor + minimum OOF Brier) ...")
     OCCAM_EPS = 0.001
     stack_iso_brier = oof_results["Stacking + Isotonic"]["oof_metrics"]["brier"]
     best_iso_brier = oof_results[best_single_iso_label]["oof_metrics"]["brier"]
@@ -812,78 +816,78 @@ def main():
             "복잡도 증가가 정당화됨 → Stacking + Isotonic 채택."
         )
 
-    log(f"  → 최종 선정: '{final_choice}' (OOF Brier={final_oof_brier:.5f})")
-    log(f"  → 선정 사유: {occam_verdict}")
+    log(f"  → final selection: '{final_choice}' (OOF Brier={final_oof_brier:.5f})")
+    log(f"  → selection rationale: {occam_verdict}")
 
-    # 7) 최종 모델 full-fit 재학습 + 저장 (Phase 5 에서 2025 예측에 사용)
-    log("\n[7/8] 최종 모델 full-fit 재학습 + 저장 ...")
+    # 7) Full-fit retraining + saving final model (used for 2025 predictions in Phase 5)
+    log("\n[7/8] Full-fit retraining + saving final model ...")
     is_best_single_iso = final_choice.endswith(" + Isotonic") and final_choice != "Stacking + Isotonic"
 
     if final_choice == "Stacking + Isotonic":
-        # C 옵션: stack 1번 full-fit + IsotonicRegression 1번 full-fit (stack OOF proba 위)
-        log("  [Stacking + Isotonic = cv='prefit' 패턴]")
-        log("  (a) Stack full-fit (전체 2024) 시작 ...")
+        # Option C: 1 full-fit of stack + 1 full-fit of IsotonicRegression (on stack OOF proba)
+        log("  [Stacking + Isotonic = cv='prefit' pattern]")
+        log("  (a) Stack full-fit (all 2024 data) starting ...")
         stack = build_stacking_estimator(tuned)
         t0 = time.time()
         stack.fit(X_full, y_full)
-        log(f"  (a) Stack full-fit 완료 ({time.time() - t0:.1f}s)")
-        log("  (b) IsotonicRegression full-fit (stack OOF proba 위) 시작 ...")
+        log(f"  (a) Stack full-fit done ({time.time() - t0:.1f}s)")
+        log("  (b) IsotonicRegression full-fit (on stack OOF proba) starting ...")
         t0 = time.time()
         iso_full = IsotonicRegression(out_of_bounds="clip")
         iso_full.fit(stack_proba, y_full.values)
-        log(f"  (b) Isotonic full-fit 완료 ({time.time() - t0:.3f}s)")
+        log(f"  (b) Isotonic full-fit done ({time.time() - t0:.3f}s)")
         final_model = {
             "type": "stack_isotonic_prefit",
             "stack": stack,
             "isotonic": iso_full,
-            "description": "Phase 5 적용: stack.predict_proba(X)[:,1] → isotonic.predict(...)",
+            "description": "Phase 5 apply: stack.predict_proba(X)[:,1] → isotonic.predict(...)",
         }
     elif is_best_single_iso:
-        # Best_Single + Isotonic (오캄의 면도날) — 가장 우수했던 단일 base + Isotonic
+        # Best_Single + Isotonic (Occam's Razor) — best single base + Isotonic
         kind = best_single_kind
-        log(f"  [{final_choice} = 오캄의 면도날 채택 — cv='prefit' 패턴]")
-        log(f"  (a) {kind.upper()} full-fit (전체 2024) 시작 ...")
+        log(f"  [{final_choice} = Occam's Razor adopted — cv='prefit' pattern]")
+        log(f"  (a) {kind.upper()} full-fit (all 2024 data) starting ...")
         base_est = make_estimator(kind)
         base_est.set_params(**tuned[kind]["best_params"])
         t0 = time.time()
         base_est.fit(X_full, y_full)
-        log(f"  (a) {kind.upper()} full-fit 완료 ({time.time() - t0:.1f}s)")
-        log(f"  (b) IsotonicRegression full-fit ({kind.upper()} OOF proba 위) 시작 ...")
+        log(f"  (a) {kind.upper()} full-fit done ({time.time() - t0:.1f}s)")
+        log(f"  (b) IsotonicRegression full-fit (on {kind.upper()} OOF proba) starting ...")
         t0 = time.time()
         iso_full = IsotonicRegression(out_of_bounds="clip")
         iso_full.fit(best_single_proba, y_full.values)
-        log(f"  (b) Isotonic full-fit 완료 ({time.time() - t0:.3f}s)")
+        log(f"  (b) Isotonic full-fit done ({time.time() - t0:.3f}s)")
         final_model = {
             "type": "best_single_isotonic_prefit",
             "base_kind": kind,
             "base_estimator": base_est,
             "isotonic": iso_full,
             "description": (
-                f"Phase 5 적용: base_estimator.predict_proba(X)[:,1] → isotonic.predict(...). "
+                f"Phase 5 apply: base_estimator.predict_proba(X)[:,1] → isotonic.predict(...). "
                 f"base = tuned {kind.upper()}, calibrator = IsotonicRegression (OOF prefit)."
             ),
         }
     elif final_choice == "Stacking (LR meta)":
         final_model = build_stacking_estimator(tuned)
-        log(f"  fit 시작 (모델: {final_choice}) ...")
+        log(f"  fit starting (model: {final_choice}) ...")
         t0 = time.time()
         final_model.fit(X_full, y_full)
-        log(f"  fit 완료 ({time.time() - t0:.1f}s)")
+        log(f"  fit done ({time.time() - t0:.1f}s)")
     else:
-        # base tuned model (no isotonic) — 일반적으로 안 옴
+        # base tuned model (no isotonic) — normally not reached
         kind = final_choice.split(" ")[0].lower()
         final_model = make_estimator(kind)
         final_model.set_params(**tuned[kind]["best_params"])
-        log(f"  fit 시작 (모델: {final_choice}) ...")
+        log(f"  fit starting (model: {final_choice}) ...")
         t0 = time.time()
         final_model.fit(X_full, y_full)
-        log(f"  fit 완료 ({time.time() - t0:.1f}s)")
+        log(f"  fit done ({time.time() - t0:.1f}s)")
     final_model_path = MODELS_DIR / "final_model.joblib"
     joblib.dump(final_model, final_model_path)
     log(f"  → saved: {final_model_path.relative_to(ROOT)}")
 
-    # 8) 산출물 저장 + 리포트
-    log("\n[8/8] 산출물 저장 + 리포트 ...")
+    # 8) Save outputs + write report
+    log("\n[8/8] Saving outputs + report ...")
     # JSON serializable artifact
     artifact = {
         "tuned": {
@@ -924,7 +928,7 @@ def main():
     )
     log(f"  → {RESULTS_JSON.relative_to(ROOT)}")
 
-    # fold size 평균
+    # Average fold sizes
     n_train_sizes, n_val_sizes = [], []
     for tr_idx, val_idx in skf.split(X_full, y_full):
         n_train_sizes.append(len(tr_idx))
@@ -947,7 +951,7 @@ def main():
         },
     )
 
-    log("\n[done] Phase 4 완료.")
+    log("\n[done] Phase 4 complete.")
 
 
 if __name__ == "__main__":

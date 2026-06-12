@@ -1,39 +1,40 @@
 """
-Phase 3: 효과 분리 실험 (Ablation Study) — 2×2 Factorial Design
-================================================================
+Phase 3: Effect Separation Experiment (Ablation Study) — 2×2 Factorial Design
+==============================================================================
 
-**목적:** 타구 데이터와 구장 환경 간 **비선형적 상호작용**을 증명하여 트리 앙상블
-도입의 학술적 정당성 확보. 2×2 Factorial Design (데이터셋 × 알고리즘) 위에서
-fold별 메트릭을 종속변수로 **2-way ANOVA** 를 수행해 interaction term 의 유의성을
-통계적으로 검정한다.
+**Purpose:** Prove the **nonlinear interaction** between batted-ball data and ballpark
+environment to establish the academic justification for introducing tree ensembles.
+A **2-way ANOVA** is run over the 2×2 Factorial Design (dataset × algorithm) with
+per-fold metrics as the dependent variable to statistically test the significance of
+the interaction term.
 
-**2×2 설계** (Phase 2 선정 샘플링 = `None`(원본), Phase 2 동일 5-fold CV splits):
+**2×2 Design** (Phase 2 selected sampling = `None` (original), same 5-fold CV splits as Phase 2):
                 ┌──────────────────────────┬──────────────────────────┐
-                │     LogReg (선형)        │     XGBoost (비선형)     │
+                │     LogReg (linear)      │     XGBoost (nonlinear)  │
   ┌─────────────┼──────────────────────────┼──────────────────────────┤
-  │  X_base(2)  │ M1 (통제군)              │ M2 (알고리즘 업그레이드) │
-  │ X_adv(61)   │ M3 (데이터 업그레이드)   │ M4 (상호작용 결합)       │
+  │  X_base(2)  │ M1 (control)             │ M2 (algorithm upgrade)   │
+  │ X_adv(61)   │ M3 (data upgrade)        │ M4 (combined interaction) │
   └─────────────┴──────────────────────────┴──────────────────────────┘
 
-**Effect Decomposition (Brier·LogLoss·F1·AUC 각각)**:
-  - 데이터 효과 in LogReg    = M3 - M1
-  - 데이터 효과 in XGBoost   = M4 - M2
-  - 알고리즘 효과 in X_base  = M2 - M1
-  - 알고리즘 효과 in X_adv   = M4 - M3
+**Effect Decomposition (for each of Brier, LogLoss, F1, AUC)**:
+  - Data effect in LogReg    = M3 - M1
+  - Data effect in XGBoost   = M4 - M2
+  - Algorithm effect in X_base  = M2 - M1
+  - Algorithm effect in X_adv   = M4 - M3
   - **Interaction effect** = (M4 - M2) - (M3 - M1) = (M4 - M3) - (M2 - M1)
-    → 양수면(Brier는 음수면) 비선형 상호작용 증명
+    → Positive value (negative for Brier) proves nonlinear interaction
 
-**2-way ANOVA** (fold-level 데이터):
-  - 종속변수: 각 fold 의 Brier / AUC / F1
-  - 요인: Data (X_base vs X_advanced) × Algo (LogReg vs XGB) + interaction term
-  - statsmodels.formula.api.ols + anova_lm 사용 (Type II SS)
+**2-way ANOVA** (fold-level data):
+  - Dependent variable: per-fold Brier / AUC / F1
+  - Factors: Data (X_base vs X_advanced) × Algo (LogReg vs XGB) + interaction term
+  - Uses statsmodels.formula.api.ols + anova_lm (Type II SS)
 
-평가 (5-fold CV OOF):
-  - 임계값 0.5 고정
-  - Brier(주) + LogLoss + F1 + ROC AUC + Precision + Recall + Accuracy
-  - fold별 mean±SD + OOF aggregate 모두 보고
+Evaluation (5-fold CV OOF):
+  - Fixed threshold 0.5
+  - Brier (primary) + LogLoss + F1 + ROC AUC + Precision + Recall + Accuracy
+  - Report both per-fold mean±SD and OOF aggregate
 
-실행:
+Run:
     PYTHONUNBUFFERED=1 /opt/miniconda3/envs/mlb-xba/bin/python \\
         pipeline/step3_phase3_ablation.py
 """
@@ -72,7 +73,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # -----------------------------------------------------------------------------
-# 경로
+# Paths
 # -----------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_DIR = ROOT / "pipeline"
@@ -85,7 +86,7 @@ Y_FULL_PARQUET = OUTPUT_DIR / "phase2_y_full.parquet"
 PHASE2_FEATURES_JSON = OUTPUT_DIR / "phase2_features.json"
 
 # -----------------------------------------------------------------------------
-# 결정 상수 (사용자 컨펌 — Phase 2 동일 random_state / CV 구조)
+# Decision constants (user-confirmed — same random_state / CV structure as Phase 2)
 # -----------------------------------------------------------------------------
 RANDOM_STATE = 42
 CV_FOLDS = 5
@@ -117,7 +118,7 @@ METRIC_KEYS = [
 
 
 # -----------------------------------------------------------------------------
-# 헬퍼
+# Helpers
 # -----------------------------------------------------------------------------
 def log(msg: str) -> None:
     print(msg, flush=True)
@@ -155,7 +156,7 @@ def build_xgb() -> xgb.XGBClassifier:
 
 
 # -----------------------------------------------------------------------------
-# 단일 cell 5-fold CV 평가
+# Single-cell 5-fold CV evaluation
 # -----------------------------------------------------------------------------
 def cv_evaluate_cell(
     cell_name: str,
@@ -195,7 +196,7 @@ def cv_evaluate_cell(
     # OOF aggregate
     oof_metrics = metrics_from_proba(y, oof_proba)
 
-    # fold mean ± SD (cm_* 제외)
+    # fold mean ± SD (excluding cm_* fields)
     fold_means = {k: float(np.mean([r[k] for r in fold_records])) for k in METRIC_KEYS}
     fold_stds = {k: float(np.std([r[k] for r in fold_records])) for k in METRIC_KEYS}
 
@@ -225,7 +226,7 @@ def cv_evaluate_cell(
 def effect_decomposition(cells: dict) -> dict:
     """
     cells: {"M1": cell_result, "M2": ..., "M3": ..., "M4": ...}
-    각 cell_result["oof_metrics"][metric] 로 delta 계산
+    Computes deltas from each cell_result["oof_metrics"][metric].
     """
     m_lower_better = {"brier", "logloss"}
     deltas: dict = {}
@@ -235,11 +236,11 @@ def effect_decomposition(cells: dict) -> dict:
 
     for metric in METRIC_KEYS:
         deltas[metric] = {
-            "data_in_logreg": diff("M3", "M1", metric),       # X_adv vs X_base, LogReg 고정
-            "data_in_xgb":    diff("M4", "M2", metric),       # X_adv vs X_base, XGB 고정
-            "algo_in_xbase":     diff("M2", "M1", metric),    # XGB vs LogReg, X_base 고정
-            "algo_in_xadvanced": diff("M4", "M3", metric),    # XGB vs LogReg, X_adv 고정
-            "combined_M4_M1":    diff("M4", "M1", metric),    # 결합 효과
+            "data_in_logreg": diff("M3", "M1", metric),       # X_adv vs X_base, LogReg fixed
+            "data_in_xgb":    diff("M4", "M2", metric),       # X_adv vs X_base, XGB fixed
+            "algo_in_xbase":     diff("M2", "M1", metric),    # XGB vs LogReg, X_base fixed
+            "algo_in_xadvanced": diff("M4", "M3", metric),    # XGB vs LogReg, X_adv fixed
+            "combined_M4_M1":    diff("M4", "M1", metric),    # combined effect
             # interaction = (M4-M2) - (M3-M1) = (M4-M3) - (M2-M1)
             "interaction": diff("M4", "M2", metric) - diff("M3", "M1", metric),
             "lower_is_better": metric in m_lower_better,
@@ -248,10 +249,10 @@ def effect_decomposition(cells: dict) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# 2-way ANOVA (fold-level, Brier·F1·AUC 각각)
+# 2-way ANOVA (fold-level, for each of Brier / F1 / AUC)
 # -----------------------------------------------------------------------------
 def run_two_way_anova(cells: dict, metrics: list[str]) -> dict:
-    """fold 별 메트릭으로 long-format DataFrame 만들고 OLS + Type II ANOVA."""
+    """Build a long-format DataFrame from per-fold metrics and run OLS + Type II ANOVA."""
     rows = []
     for cell_key, cell in cells.items():
         for r in cell["fold_records"]:
@@ -283,7 +284,7 @@ def run_two_way_anova(cells: dict, metrics: list[str]) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# 리포트 작성
+# Report generation
 # -----------------------------------------------------------------------------
 def write_report(
     cells: dict,
@@ -312,7 +313,7 @@ def write_report(
     )
     L.append("")
 
-    # 1. 결정 사항
+    # 1. Decisions
     L.append("## 1. 결정 사항 (사용자 컨펌 — Phase 1 dome-masking 이후 분기 전수 재확인)")
     L.append("")
     L.append("| # | 결정 항목 | 채택안 | 사유 |")
@@ -327,7 +328,7 @@ def write_report(
     L.append(f"| 8 | 임계값 | 0.5 고정 | 공정 비교. 임계값 최적화는 Phase 4. |")
     L.append("")
 
-    # 2. 실험 설계
+    # 2. Experimental design
     L.append("## 2. 실험 설계 — 2×2 Factorial Design")
     L.append("")
     L.append("**변수 셋:**")
@@ -351,7 +352,7 @@ def write_report(
     L.append(f"평균 fold train size ≈ {n_train_fold_mean:,d}, val size ≈ {n_val_fold_mean:,d}.")
     L.append("")
 
-    # 3. 결과 — 셀별 OOF + fold mean±SD
+    # 3. Results — per-cell OOF + fold mean±SD
     L.append("## 3. 모델별 결과 (OOF + fold mean±SD)")
     L.append("")
     L.append("### 3.1 OOF aggregate")
@@ -455,7 +456,7 @@ def write_report(
             )
         L.append("")
 
-    # 6. 해석
+    # 6. Interpretation
     L.append("## 6. 해석")
     L.append("")
     L.append("### 6.1 표면적 관찰")
@@ -518,7 +519,7 @@ def write_report(
     )
     L.append("")
 
-    # 7. 산출물
+    # 7. Artifacts
     L.append("## 7. 산출물")
     L.append("")
     L.append(
@@ -540,7 +541,7 @@ def main():
     log("Phase 3: 효과 분리 실험 (2×2 Factorial Ablation + 2-way ANOVA)")
     log("=" * 80)
 
-    # 1) 데이터 로드
+    # 1) Load data
     log("\n[1/5] 데이터 로드 ...")
     X_full = pd.read_parquet(X_FULL_PARQUET)
     y_full = pd.read_parquet(Y_FULL_PARQUET)["is_hit"]
@@ -548,7 +549,7 @@ def main():
     log(f"  X_full {X_full.shape}, y_full {y_full.shape}, hit_rate={y_full.mean():.4f}")
     log(f"  best_sampling (Phase 2): {feat_meta.get('best_sampling')}")
 
-    # 2) 변수 셋 분리
+    # 2) Separate feature sets
     log("\n[2/5] 변수 셋 분리 ...")
     missing = [c for c in X_BASE_COLS if c not in X_full.columns]
     if missing:
@@ -558,10 +559,10 @@ def main():
     log(f"  X_base    : {len(X_BASE_COLS)} 변수 = {X_BASE_COLS}")
     log(f"  X_advanced: {X_adv.shape[1]} 변수")
 
-    # 3) CV 구조 (Phase 2와 동일)
+    # 3) CV structure (same as Phase 2)
     skf = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
 
-    # 4) 4 cell × 5-fold CV 평가
+    # 4) 4-cell × 5-fold CV evaluation
     log(f"\n[3/5] 4 cell × {CV_FOLDS}-fold CV 평가 ...")
     pbar = tqdm(total=4, desc="cells", ncols=80, leave=True)
     cells: dict = {}
@@ -601,9 +602,9 @@ def main():
         f"{deltas['roc_auc']['interaction']:+.5f}"
     )
 
-    # 6) 저장
+    # 6) Save artifacts
     log("\n[5/5] 산출물 저장 ...")
-    # fold size 평균 (보고용)
+    # Average fold sizes (for reporting)
     fold_train_sizes = []
     fold_val_sizes = []
     for tr_idx, val_idx in skf.split(X_full, y_full):
@@ -612,7 +613,7 @@ def main():
     n_train_mean = int(np.mean(fold_train_sizes))
     n_val_mean = int(np.mean(fold_val_sizes))
 
-    # JSON serializable cells (oof_proba 는 길이만 보존 + 별도 npy 저장 권장이지만 일단 포함)
+    # JSON-serializable cells (oof_proba included as-is; separate .npy storage recommended for large arrays)
     artifact = {
         "cells": {k: {kk: vv for kk, vv in v.items() if kk != "oof_proba"} for k, v in cells.items()},
         "oof_proba": {k: v["oof_proba"] for k, v in cells.items()},

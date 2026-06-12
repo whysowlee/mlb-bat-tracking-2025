@@ -1,26 +1,26 @@
 """
-Phase 1: 데이터 통합, 도메인 기반 전처리 및 연도별 분리
-======================================================
+Phase 1: Data integration, domain-driven preprocessing, and temporal split by season
+=====================================================================================
 
-수행 작업:
-  1) Statcast 타구 데이터 로드
-  2) BIP(인플레이 타구) 필터링            [bb_type ∈ {ground/fly/line/popup}]
-  3) Athletics(ATH) 홈경기 행 제외        [2024 Oakland, 2025 Sacramento 이전 이슈]
-  4) 핵심 물리 결측 행 제거               [launch_speed 또는 launch_angle NaN]
-  5) 파울 팝아웃 컷오프 제거              [|launch_angle| > 60°]
-  6) Target 변수 is_hit 생성              [single/double/triple/home_run = 1]
-  7) 배트 트래킹 변수 결측 플래그 추가    [bat_speed 등 → *_is_missing]
-  8) 구장 스펙(ballparks.csv) 병합        [home_team ↔ team_name]
-  9) Open-Meteo Archive API 기상 데이터 호출 및 병합
-       - 시점: daytime ≥ 0.5 → 13:00 / 그 외 → 19:00 (현지시각 snapshot)
-       - 변수 8종: temperature_2m, relative_humidity_2m, surface_pressure,
-                  wind_speed_10m, wind_direction_10m, precipitation,
-                  cloud_cover, wind_gusts_10m
-       - roof 컬럼은 그대로 유지(다운스트림에서 환경 영향 제거 시 활용)
- 10) game_year 기준 Temporal Split → 2024_data.parquet / 2025_data.parquet
- 11) 각 단계 attrition을 phase1_report.md 생성용 통계로 함께 기록
+Steps performed:
+  1) Load Statcast batted-ball data
+  2) Filter to BIP (balls in play)        [bb_type ∈ {ground/fly/line/popup}]
+  3) Drop Athletics (ATH) home-game rows  [2024 Oakland, 2025 Sacramento relocation issue]
+  4) Remove rows missing core physics     [launch_speed or launch_angle NaN]
+  5) Apply foul-popup cutoff              [|launch_angle| > 60°]
+  6) Create target variable is_hit        [single/double/triple/home_run = 1]
+  7) Add bat-tracking missingness flags   [bat_speed etc. → *_is_missing]
+  8) Merge ballpark specs (ballparks.csv) [home_team ↔ team_name]
+  9) Fetch and merge Open-Meteo Archive API weather data
+       - Snapshot time: daytime ≥ 0.5 → 13:00 / otherwise → 19:00 (local time)
+       - 8 variables: temperature_2m, relative_humidity_2m, surface_pressure,
+                      wind_speed_10m, wind_direction_10m, precipitation,
+                      cloud_cover, wind_gusts_10m
+       - roof column is retained as-is (used downstream to neutralize environmental effects)
+ 10) Temporal Split by game_year → 2024_data.parquet / 2025_data.parquet
+ 11) Record per-step attrition statistics for phase1_report.md generation
 
-실행:
+Usage:
     /opt/miniconda3/envs/mlb-xba/bin/python pipeline/step1_phase1_preprocessing.py
 """
 
@@ -36,7 +36,7 @@ import pandas as pd
 import requests
 
 # -----------------------------------------------------------------------------
-# 경로 상수
+# Path constants
 # -----------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "데이터셋"
@@ -52,7 +52,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # -----------------------------------------------------------------------------
-# 결정 상수 (사용자 컨펌 완료)
+# Decision constants (confirmed by user)
 # -----------------------------------------------------------------------------
 HIT_EVENTS = {"single", "double", "triple", "home_run"}
 BB_TYPES_BIP = {"ground_ball", "fly_ball", "line_drive", "popup"}
@@ -79,29 +79,29 @@ WEATHER_HOURLY_VARS = [
     "wind_gusts_10m",
 ]
 OPEN_METEO_URL = "https://archive-api.open-meteo.com/v1/archive"
-WEATHER_HOUR_DAY = 13   # daytime ≥ 0.5 인 구장: 13시 현지시각
-WEATHER_HOUR_NIGHT = 19 # 그 외 구장: 19시 현지시각
+WEATHER_HOUR_DAY = 13   # parks with daytime ≥ 0.5: 13:00 local time
+WEATHER_HOUR_NIGHT = 19 # all other parks: 19:00 local time
 
-# 돔 마스킹 — 사용자 결정 #11 (2026-05-29)
-# MLB Stats API 의 weather.condition 필드에서 "Roof Closed" 명시된 경기에 적용.
-# 도메인 근거: 외부 기상 5종은 실내에서 무력 / 실내 공조 표준값으로 보정.
+# Dome masking — user decision #11 (2026-05-29)
+# Applied to games where the MLB Stats API weather.condition field explicitly states "Roof Closed".
+# Domain rationale: the 5 outdoor weather variables are irrelevant indoors; replaced with HVAC standard values.
 ROOF_STATUS_CACHE_PATH = PIPELINE_DIR / "cache" / "mlb_roof_status_cache.json"
-DOME_MASK_EXTERNAL_VARS = [  # 모두 0으로 → 실내 외부 기상 무력
+DOME_MASK_EXTERNAL_VARS = [  # set all to 0 → neutralize outdoor weather indoors
     "wx_wind_speed_10m", "wx_wind_gusts_10m", "wx_wind_direction_10m",
     "wx_precipitation", "wx_cloud_cover",
 ]
-DOME_MASK_INDOOR_DEFAULTS = {  # MLB 돔 구장 공조 표준값
-    "wx_temperature_2m": 22.0,         # MLB 돔 공조 표준 22°C (Tropicana·Minute Maid 공식)
-    "wx_relative_humidity_2m": 50.0,   # ASHRAE 권장 40~60% 중간값
-    # surface_pressure 는 변경 X (실내·외 기압 동일)
+DOME_MASK_INDOOR_DEFAULTS = {  # MLB dome ballpark HVAC standard values
+    "wx_temperature_2m": 22.0,         # MLB dome HVAC standard 22°C (Tropicana Field / Minute Maid Park official)
+    "wx_relative_humidity_2m": 50.0,   # midpoint of ASHRAE-recommended range 40–60%
+    # surface_pressure left unchanged (indoor and outdoor air pressure are equal)
 }
 
 
 # -----------------------------------------------------------------------------
-# 유틸: attrition 통계 누적용
+# Utility: accumulate per-step attrition statistics
 # -----------------------------------------------------------------------------
 class Attrition:
-    """전처리 각 단계의 행 수를 기록한다."""
+    """Records the row count at each preprocessing step."""
 
     def __init__(self):
         self.steps: list[dict] = []
@@ -128,14 +128,14 @@ class Attrition:
 
 
 # -----------------------------------------------------------------------------
-# 1) Statcast 로드 + 단계별 정제
+# 1) Load Statcast data + step-by-step cleaning
 # -----------------------------------------------------------------------------
 def load_and_clean_statcast(attrition: Attrition) -> pd.DataFrame:
     print("[load] statcast CSV 로드 중...")
     df = pd.read_csv(STATCAST_CSV, low_memory=False)
     attrition.record("0. 원본 로드", df, note="2024+2025 전체 pitch 단위")
 
-    # BIP 필터
+    # BIP filter
     df = df[df["bb_type"].isin(BB_TYPES_BIP)].copy()
     attrition.record(
         "1. BIP 필터 (bb_type ∈ {ground/fly/line/popup})",
@@ -143,7 +143,7 @@ def load_and_clean_statcast(attrition: Attrition) -> pd.DataFrame:
         note="옵션 C 채택",
     )
 
-    # Athletics 제외
+    # Exclude Athletics
     df = df[~df["home_team"].isin(EXCLUDE_TEAMS)].copy()
     attrition.record(
         "2. Athletics(ATH) 홈경기 행 제외",
@@ -151,7 +151,7 @@ def load_and_clean_statcast(attrition: Attrition) -> pd.DataFrame:
         note="2024 Oakland / 2025 Sacramento 이전 이슈로 분석 제외",
     )
 
-    # 핵심 물리 결측 행 제거
+    # Remove rows missing core physics features
     core_missing = df["launch_speed"].isna() | df["launch_angle"].isna()
     df = df.loc[~core_missing].copy()
     attrition.record(
@@ -160,7 +160,7 @@ def load_and_clean_statcast(attrition: Attrition) -> pd.DataFrame:
         note="xBA 핵심 입력 결측 → 모델링 불가",
     )
 
-    # 파울 팝아웃 컷오프
+    # Foul-popup cutoff
     df = df[df["launch_angle"].abs() <= LAUNCH_ANGLE_ABS_MAX].copy()
     attrition.record(
         f"4. |launch_angle| > {LAUNCH_ANGLE_ABS_MAX:.0f}° 컷오프",
@@ -168,21 +168,21 @@ def load_and_clean_statcast(attrition: Attrition) -> pd.DataFrame:
         note="readme 예시 적용 — 파울 팝아웃/극단 음각 라인드라이브 제거",
     )
 
-    # is_hit 생성
+    # Create is_hit target variable
     df["is_hit"] = df["events"].isin(HIT_EVENTS).astype("int8")
 
-    # 배트 트래킹 결측 플래그
+    # Bat-tracking missingness flags
     for col in BAT_TRACKING_COLS:
         df[f"{col}_is_missing"] = df[col].isna().astype("int8")
 
-    # game_date 파싱
+    # Parse game_date
     df["game_date"] = pd.to_datetime(df["game_date"], errors="raise")
 
     return df
 
 
 # -----------------------------------------------------------------------------
-# 2) 구장 스펙 병합
+# 2) Merge ballpark specs
 # -----------------------------------------------------------------------------
 def merge_ballparks(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     parks = pd.read_csv(BALLPARKS_CSV)
@@ -199,12 +199,12 @@ def merge_ballparks(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 # -----------------------------------------------------------------------------
-# 3) 기상 데이터 (Open-Meteo Archive) — 구장×기간 단위 캐시 후 시점 선택
+# 3) Weather data (Open-Meteo Archive) — cache per park×period, then select snapshot hour
 # -----------------------------------------------------------------------------
 def fetch_weather_for_park(
     team: str, lat: float, lon: float, start_date: str, end_date: str
 ) -> pd.DataFrame:
-    """구장 1곳에 대해 hourly 기상 데이터를 받아 DataFrame으로 반환. 디스크 캐시 사용."""
+    """Fetch hourly weather data for a single ballpark and return as a DataFrame. Uses disk cache."""
     cache_path = CACHE_DIR / f"weather_{team}_{start_date}_{end_date}.json"
     if cache_path.exists():
         with cache_path.open("r", encoding="utf-8") as f:
@@ -232,7 +232,7 @@ def fetch_weather_for_park(
             raise RuntimeError(f"Open-Meteo fetch failed for team={team}")
         with cache_path.open("w", encoding="utf-8") as f:
             json.dump(payload, f)
-        time.sleep(0.5)  # 가벼운 호출 간격
+        time.sleep(0.5)  # light throttle between API calls
 
     hourly = payload["hourly"]
     df = pd.DataFrame(hourly)
@@ -244,7 +244,7 @@ def fetch_weather_for_park(
 
 
 def build_weather_lookup(parks: pd.DataFrame, date_min: str, date_max: str) -> pd.DataFrame:
-    """모든 구장에 대해 시점 선택된 기상 한 행/일을 만든다."""
+    """Build one weather row per park per day using the selected snapshot hour."""
     chunks = []
     for _, row in parks.iterrows():
         team = row["team_name"]
@@ -272,14 +272,14 @@ def build_weather_lookup(parks: pd.DataFrame, date_min: str, date_max: str) -> p
 
 
 def apply_dome_masking(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
-    """돔/지붕 닫힘 경기의 외부 기상 5종을 0으로, 실내 공조 변수 2종을 표준값으로 마스킹.
+    """Mask 5 outdoor weather variables to 0 and set 2 indoor HVAC variables to standard values for dome/roof-closed games.
 
-    사용자 결정 #11 (2026-05-29):
-      - 대상: MLB Stats API 의 `weather.condition` 에 "Roof Closed" 또는 "Dome" 포함된 경기
-              (TB 의 경우 자동 closed). retractable 구장(SEA/TOR/MIL/TEX/AZ/MIA/HOU)에 적용.
-      - 외부 5종 (wx_wind_*, wx_precipitation, wx_cloud_cover) → 0
-      - 실내 2종 (wx_temperature_2m=22°C, wx_relative_humidity_2m=50%) → 공조 표준값
-      - wx_surface_pressure 는 그대로 (실내·외 기압 동일)
+    User decision #11 (2026-05-29):
+      - Target: games where the MLB Stats API `weather.condition` contains "Roof Closed" or "Dome"
+                (TB games are automatically classified as closed). Applied to retractable parks (SEA/TOR/MIL/TEX/AZ/MIA/HOU).
+      - Outdoor 5 variables (wx_wind_*, wx_precipitation, wx_cloud_cover) → 0
+      - Indoor 2 variables (wx_temperature_2m=22°C, wx_relative_humidity_2m=50%) → HVAC standard values
+      - wx_surface_pressure left unchanged (indoor and outdoor air pressure are equal)
 
     Returns: (masked_df, n_masked_rows, n_total_eligible_rows)
     """
@@ -292,17 +292,17 @@ def apply_dome_masking(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
     print(f"[dome_mask] roof_status 캐시 로드: {len(cache):,d}경기")
 
     df = df.copy()
-    # game_pk 문자열로 변환해 cache 키와 매칭
+    # Convert game_pk to string to match cache keys
     df["_gpk_str"] = df["game_pk"].astype(int).astype(str)
     status_series = df["_gpk_str"].map(lambda pk: cache.get(pk, {}).get("status"))
     closed_mask = status_series == "closed"
     n_masked = int(closed_mask.sum())
-    n_eligible = int(status_series.notna().sum())  # cache 에 등록된 게임 = retractable+TB
+    n_eligible = int(status_series.notna().sum())  # games registered in cache = retractable + TB
 
-    # 외부 5종 → 0
+    # Outdoor 5 variables → 0
     for col in DOME_MASK_EXTERNAL_VARS:
         df.loc[closed_mask, col] = 0.0
-    # 실내 2종 → 표준값
+    # Indoor 2 variables → standard HVAC values
     for col, val in DOME_MASK_INDOOR_DEFAULTS.items():
         df.loc[closed_mask, col] = val
 
@@ -322,14 +322,14 @@ def merge_weather(df: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     )
     n_missing = merged["wx_temperature_2m"].isna().sum()
     print(f"[merge] weather 병합 완료. 기상 결측 행={n_missing:,d}")
-    # 중복 키 정리
+    # Drop duplicate key columns
     drop_cols = [c for c in merged.columns if c.endswith("_wxdup")] + ["date"]
     merged = merged.drop(columns=drop_cols, errors="ignore")
     return merged
 
 
 # -----------------------------------------------------------------------------
-# 4) Temporal Split + 저장
+# 4) Temporal Split + save
 # -----------------------------------------------------------------------------
 def split_and_save(df: pd.DataFrame) -> dict:
     info = {}
@@ -354,7 +354,7 @@ def split_and_save(df: pd.DataFrame) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# 5) phase1_report.md 작성
+# 5) Write phase1_report.md
 # -----------------------------------------------------------------------------
 def write_report(
     attrition: Attrition,
@@ -544,12 +544,12 @@ def main():
 
     attrition = Attrition()
 
-    # BIP 필터 직전 bb_type 분포(원본 BIP 후보 분포)도 리포트에 남기기 위해 별도로 한 번 더 산출
+    # Compute bb_type distribution just before the BIP filter to preserve original BIP candidate counts in the report
     df_raw = pd.read_csv(STATCAST_CSV, low_memory=False)
     bb_type_dist_before = df_raw["bb_type"].value_counts(dropna=False)
     del df_raw
 
-    # BIP 필터 직전 시점에서의 배트트래킹 결측률(연도별) 측정용
+    # Measure bat-tracking missingness rates by season at the pre-BIP-filter stage
     df_for_missing = pd.read_csv(
         STATCAST_CSV,
         low_memory=False,
@@ -564,7 +564,7 @@ def main():
     )
     del df_for_missing, bip_only
 
-    # 본 파이프라인
+    # Main pipeline
     df = load_and_clean_statcast(attrition)
     df, parks = merge_ballparks(df)
 
@@ -577,16 +577,16 @@ def main():
     n_weather_total = len(df)
     n_weather_missing = int(df["wx_temperature_2m"].isna().sum())
 
-    # 돔 마스킹 적용 (사용자 결정 #11) — 외부 기상 무력화 + 실내 공조 표준값
+    # Apply dome masking (user decision #11) — neutralize outdoor weather + apply indoor HVAC standard values
     df, n_dome_masked, n_dome_eligible = apply_dome_masking(df)
 
-    # 기상 변수 요약 통계
+    # Weather variable summary statistics
     weather_summary = df[[f"wx_{v}" for v in WEATHER_HOURLY_VARS]].describe().T
 
-    # 저장
+    # Save outputs
     split_info = split_and_save(df)
 
-    # 리포트
+    # Report
     parks_used = parks["team_name"].nunique() - len(EXCLUDE_TEAMS & set(parks["team_name"]))
     write_report(
         attrition=attrition,

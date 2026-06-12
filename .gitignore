@@ -1,8 +1,8 @@
-# ── OS / 에디터 ──────────────────────────────
+# ── OS / editor ──────────────────────────────
 .DS_Store
 **/.DS_Store
 
-# ── Office 임시(잠금) 파일 ───────────────────
+# ── Office temp (lock) files ─────────────────
 ~$*
 
 # ── Python ──────────────────────────────────
@@ -13,17 +13,59 @@ __pycache__/
 .venv/
 venv/
 
-# ── 대용량 원본 데이터셋 (GitHub 100MB 제한 초과) ──
-# statcast_bat_tracking_2024_2025.csv (807MB) 는 별도 보관
+# ── Large raw dataset (exceeds GitHub 100MB limit) ──
+# statcast_bat_tracking_2024_2025.csv (807MB) is stored separately
 데이터셋/statcast_bat_tracking_2024_2025.csv
 
-# ── 파이프라인 생성 산출물 (재현 가능 — 학습 모델/중간 데이터/캐시/로그) ──
+# ── Pipeline-generated artifacts (reproducible — trained models / intermediates / cache / logs) ──
 pipeline/output/
 pipeline/cache/
 pipeline/logs/
 
-# ── 모델 / 중간 데이터 파일 형식 (어디에 있든 제외) ──
+# ── Model / intermediate data formats (excluded anywhere) ──
 *.joblib
 *.parquet
 *.npy
 *.pkl
+
+# ── Report-writing scripts & artifacts (kept local, not on GitHub) ──
+# Only the core ca-xBA binary-model modules are tracked. Report/figure tooling is excluded.
+# Figure-generation scripts
+pipeline/step1b_phase1_figures.py
+pipeline/step2b_phase2_figures.py
+pipeline/step3b_phase3_figures.py
+pipeline/step4b_phase4_figures.py
+pipeline/step5b_phase5_figures.py
+pipeline/step5c_supplementary.py
+pipeline/figures/
+# Per-phase report outputs
+pipeline/phase1_report.md
+pipeline/phase2_report.md
+pipeline/phase3_report.md
+pipeline/phase4_report.md
+pipeline/phase5_report.md
+# Report builders / restructuring / formatting scripts
+generate_docx_report.py
+generate_pdf_report.py
+restruct_*.py
+apply_edits.py
+ch5_edits.py
+add_heading_numbering.py
+manual_heading_numbers.py
+renumber_all.py
+renumber_captions.py
+strip_comments.py
+toc_numbers.py
+word_to_pdf.sh
+# Report sources / intermediates / drafts
+_header.tex
+_merged_report.tex
+_merged_report_debug.md
+_w2.docx
+report_detail.md
+example.md
+보고서 수정사항.md
+# Final report: only the English DOCX (ca-xBA_Final_Report.docx) is tracked.
+# The PDF and the Korean original are kept locally but excluded from Git.
+*.pdf
+ca-xBA_Final_Report_편집용.docx

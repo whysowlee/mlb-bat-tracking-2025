@@ -1,68 +1,70 @@
 """
-Phase 5: 최종 지표(ca-xBA) 산출 및 세이버메트릭스 가치 검증
+Phase 5: Final Metric (ca-xBA) Computation and Sabermetric Value Validation
 ==============================================================
 
-본 단계는 readme.md Phase 5 (2026-05-29 업데이트) 의 작업을 수행한다.
+This step executes the work described in readme.md Phase 5 (updated 2026-05-29).
 
-**검증 논리 (readme 이론적 배경):**
-ca-xBA 는 단순 분류기 출력이 아니라, 타자가 시즌 동안 만들어낸 *타구 품질의 시즌 누적 평균* 이다.
-모델의 확률 보정(Calibration)이 완벽할수록 이 평균값은 선수의 실질 타격 생산력 지표인
-**`wOBA`** (BIP 한정 가중 출루율, Baseball Savant 표준 명명 — 학술 용어 wOBAcon 과 수학적 동일)
-와 강한 양의 상관관계를 가진다. 본 Phase 는 그 상관관계를 실제 2025 시즌 ground truth
-(`데이터셋/validation_2025_gt.csv`) 로 검증한다.
+**Validation Logic (readme theoretical background):**
+ca-xBA is not merely a classifier output; it is the *season-accumulated average of batted-ball
+quality* produced by a batter over a season. The better the model's probability Calibration,
+the stronger the positive correlation between this average and the player's true offensive
+production metric **`wOBA`** (BIP-restricted weighted OBP, Baseball Savant standard naming —
+mathematically identical to the academic term wOBAcon). This Phase validates that correlation
+against the actual 2025 season ground truth (`데이터셋/validation_2025_gt.csv`).
 
-**검증 구도 (readme Phase 5 2026-05-29 업데이트):**
-Y축 = 실제 `wOBA` / 독립변수 1 = 우리 `ca-xBA` / 독립변수 2 = MLB 공식 `xBA` (est_ba).
-1:1 R² 대조로 우리 모델 우위 입증. xwOBA(est_woba)는 wOBA 자체 예측 지표(동어반복) → 제외.
+**Validation Setup (readme Phase 5 updated 2026-05-29):**
+Y-axis = actual `wOBA` / Independent variable 1 = our `ca-xBA` / Independent variable 2 = MLB
+official `xBA` (est_ba). Demonstrating our model's superiority via 1:1 R² comparison.
+xwOBA (est_woba) is a tautological self-predictor of wOBA → excluded.
 
-**8건 핵심 결정 + 2건 추가 결정 (사용자 컨펌, 도메인 맥락 포함):**
+**8 Core Decisions + 2 Additional Decisions (user-confirmed, with domain context):**
 
-1. **메인 엔진 = LGBM + Isotonic** (Phase 4 OOF Brier=0.13092, 오캄의 면도날 자동 선정)
-   - 단순 분류가 아닌 *개별 타구의 정확한 기대 타율(확률)* 산출 목적.
+1. **Main engine = LGBM + Isotonic** (Phase 4 OOF Brier=0.13092, selected by Occam's razor)
+   - Goal: accurate per-pitch expected batting average (probability), not simple classification.
 
-2. **집계 방식 = BIP 단순 평균** (`Σ proba / Σ BIP`, PA 가중 금지)
-   - ca-xBA 는 *타구 본연의 퀄리티* 지표. BB/K 포함 PA 를 분모로 섞으면 콘택트 능력 희석.
+2. **Aggregation = simple BIP mean** (`Σ proba / Σ BIP`, PA weighting prohibited)
+   - ca-xBA is a *pure contact-quality* metric. Including BB/K in the denominator dilutes contact ability.
 
-3. **최소 PA 컷오프 = 250** (규정타석 502 의 약 절반)
-   - 팀의 실질적 1군 레귤러 (확실한 플래툰 주전 또는 전/후반기 한 축).
-   - 통계 신뢰성(BIP ~150) 확보 + 선수 풀 풍부화 최적 밸런스.
-   - ⭐ expected_stats.csv 자체에 이미 적용됨 (Baseball Savant 기본 qualifier) → 추가 필터 불요.
+3. **Minimum PA cutoff = 250** (approximately half the qualifying threshold of 502)
+   - Covers genuine MLB regulars (confirmed platoon starters or first/second-half anchors).
+   - Optimal balance between statistical reliability (BIP ~150) and player pool richness.
+   - ⭐ Already applied within expected_stats.csv (Baseball Savant default qualifier) → no additional filter needed.
 
-4. **ID 매칭 = MLBAM 직접 조인** (fuzzy 매칭 절대 금지)
-   - 동명이인 (Will Smith 등) 다수 → 고유 식별자 하드 매칭만이 대참사 방지.
-   - csv 의 `player_id` = MLBAM ID 확인됨 → 직접 조인 (시나리오 A).
+4. **ID matching = direct MLBAM join** (fuzzy matching strictly prohibited)
+   - Many players share names (e.g., Will Smith) → only hard matching on unique identifiers prevents disasters.
+   - Confirmed: csv `player_id` = MLBAM ID → direct join (Scenario A).
 
-5. **포지션 정의 = 시즌 최다 출장 포지션** (외부 API: MLB Stats API 직접 호출)
-   - 실버 슬러거 수상 기준도 당해 연도 주 출장 포지션 → 검증 기준 통일.
-   - statsapi.mlb.com 직접 호출 + 캐시 (309명 ≈ 5분).
+5. **Position definition = most-played position in the season** (external API: MLB Stats API direct call)
+   - Silver Slugger award criteria also use the primary position of that year → aligns validation standard.
+   - Direct call to statsapi.mlb.com + cache (309 players ≈ 5 min).
 
-6. **실버 슬러거 명단 = 정적 CSV** (`데이터셋/silver_slugger_2025.csv`)
-   - Ground truth 는 런타임 변동 없도록 독립 파일로 고정 (데이터 마이닝 정석).
+6. **Silver Slugger roster = static CSV** (`데이터셋/silver_slugger_2025.csv`)
+   - Ground truth fixed as an independent file to prevent runtime changes (standard data-mining practice).
 
-7. **운(Luck) 분석 = (AVG − ca-xBA) 단순 차이값**
-   - 야구 도메인의 *할/푼/리* 직관 (Z-score보다 설득력 높음).
-   - 양수 = 운 좋음 / 음수 = 불운.
+7. **Luck analysis = simple difference (AVG − ca-xBA)**
+   - Intuitive in the baseball domain (more interpretable than Z-score).
+   - Positive = lucky / Negative = unlucky.
 
-8. **BIP 정의 일치 = assert** (Baseball Savant wOBA 모수 = BBE vs 우리 BIP 정의)
-   - `bb_type ∈ {ground_ball, fly_ball, line_drive, popup}` 일치.
-   - 분모 1개 틀어지면 R² 오염 → 필수 안전장치.
-   - 단 우리 BIP < csv.bip 예상 (ATH 홈경기 제외 + |la|>60 컷오프 + 핵심 결측 제거 영향) →
-     strict equality 가 아닌 "우리 ≤ csv" + 차이 분석으로 검증.
+8. **BIP definition consistency = assert** (Baseball Savant wOBA denominator = BBE vs our BIP definition)
+   - `bb_type ∈ {ground_ball, fly_ball, line_drive, popup}` must match.
+   - A single denominator mismatch contaminates R² → essential safeguard.
+   - However, our BIP < csv.bip is expected (ATH home-game exclusion + |la|>60 cutoff + key missing-value removal) →
+     validated with "our ≤ csv" + difference analysis rather than strict equality.
 
-9. **포지션 정밀 검증** (사용자 결정 #5 보강): MLB Stats API 로 309명 각각 조회 → 포지션별 Top 10 리더보드.
+9. **Position precision check** (supplement to decision #5): query each of 309 players via MLB Stats API → position-by-position Top 10 leaderboard.
 
-10. **1:1 R² 대조 (readme 2026-05-29 업데이트)** = ca-xBA vs wOBA / MLB 공식 xBA(est_ba) vs wOBA.
-   - xwOBA(est_woba) 는 wOBA 자체 예측 지표(동어반복·체급 불일치)로 비교에서 제외.
+10. **1:1 R² comparison (readme updated 2026-05-29)** = ca-xBA vs wOBA / MLB official xBA (est_ba) vs wOBA.
+   - xwOBA (est_woba) is a Statcast metric that directly predicts wOBA → tautological / mismatched scope, excluded from comparison.
 
-**산출:**
-  - pipeline/output/phase5_player_metrics.csv (선수별 ca-xBA·wOBA·luck·position 등)
+**Outputs:**
+  - pipeline/output/phase5_player_metrics.csv (per-player ca-xBA, wOBA, luck, position, etc.)
   - pipeline/output/phase5_silver_slugger_validation.csv
-  - pipeline/output/phase5_results.json (요약 메트릭 · 상관계수 · 운 Top10 · 실버 슬러거 검증)
-  - pipeline/output/phase5_positions_cache.json (statsapi 캐시)
+  - pipeline/output/phase5_results.json (summary metrics, correlations, luck Top 10, Silver Slugger validation)
+  - pipeline/output/phase5_positions_cache.json (statsapi cache)
   - pipeline/phase5_report.md
   - pipeline/logs/step5.log
 
-실행:
+Run:
     PYTHONUNBUFFERED=1 /opt/miniconda3/envs/mlb-xba/bin/python pipeline/step5_phase5_value_validation.py \\
         2>&1 | tee pipeline/logs/step5.log
 """
@@ -86,13 +88,13 @@ from tqdm import tqdm
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# step2 의 build_raw_feature_matrix 재사용 (Phase 2 와 정확히 동일한 전처리 보장)
+# Reuse build_raw_feature_matrix from step2 (guarantees identical preprocessing to Phase 2)
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "pipeline"))
 from step2_phase2_correlation_sampling import build_raw_feature_matrix  # noqa: E402
 
 # -----------------------------------------------------------------------------
-# 경로
+# Paths
 # -----------------------------------------------------------------------------
 PIPELINE_DIR = ROOT / "pipeline"
 OUTPUT_DIR = PIPELINE_DIR / "output"
@@ -105,27 +107,27 @@ PLAYER_METRICS_CSV = OUTPUT_DIR / "phase5_player_metrics.csv"
 SILVER_SLUGGER_VAL_CSV = OUTPUT_DIR / "phase5_silver_slugger_validation.csv"
 
 DATA_2025_PARQUET = OUTPUT_DIR / "2025_data.parquet"
-FINAL_MODEL = OUTPUT_DIR / "phase4_models" / "final_model.joblib"  # Phase 4 최종 모델 (LGBM + Isotonic, OOF Brier=0.13092)
-FINAL_MODEL_OOF_BRIER = 0.13092  # 사용자 명시 — 리포트 서두 하드코딩
+FINAL_MODEL = OUTPUT_DIR / "phase4_models" / "final_model.joblib"  # Phase 4 final model (LGBM + Isotonic, OOF Brier=0.13092)
+FINAL_MODEL_OOF_BRIER = 0.13092  # user-specified — hardcoded in report header
 PHASE4_RESULTS_JSON = OUTPUT_DIR / "phase4_results.json"
 PHASE2_FEATURES_JSON = OUTPUT_DIR / "phase2_features.json"
 PHASE2_SCALER = OUTPUT_DIR / "phase2_scaler.joblib"
-VALIDATION_GT_CSV = DATA_DIR / "validation_2025_gt.csv"  # 사용자 명명 (Ground Truth 강조)
+VALIDATION_GT_CSV = DATA_DIR / "validation_2025_gt.csv"  # user-named (emphasizes Ground Truth)
 SILVER_SLUGGER_CSV = DATA_DIR / "silver_slugger_2025.csv"
 
 # -----------------------------------------------------------------------------
-# 결정 상수 (사용자 컨펌)
+# Decision constants (user-confirmed)
 # -----------------------------------------------------------------------------
-MIN_PA = 250  # 사용자 결정 #3 (expected_stats.csv 자체 적용)
-THRESHOLD = 0.5  # 분류 임계값 (Phase 2~4 통일)
-POSITION_TOPN = 10  # 포지션별 ca-xBA Top N (실버 슬러거 검증용)
-BIP_TOLERANCE_FRACTION = 0.50  # our_bip 가 csv.bip 의 50% 이상이면 OK (ATH 제외 + 컷오프 영향 흡수)
-N_LUCK_TOPN = 10  # 운/불운 타자 Top 10
+MIN_PA = 250  # decision #3 (applied within expected_stats.csv)
+THRESHOLD = 0.5  # classification threshold (unified across Phase 2-4)
+POSITION_TOPN = 10  # ca-xBA Top N per position (for Silver Slugger validation)
+BIP_TOLERANCE_FRACTION = 0.50  # OK if our_bip >= 50% of csv.bip (absorbs ATH exclusion + cutoff effects)
+N_LUCK_TOPN = 10  # lucky/unlucky batter Top 10
 
-# 포지션 fetch 설정
+# Position fetch settings
 STATSAPI_BASE = "https://statsapi.mlb.com/api/v1/people"
 STATSAPI_SEASON = 2025
-STATSAPI_DELAY_SEC = 0.05  # rate limit 회피
+STATSAPI_DELAY_SEC = 0.05  # rate-limit avoidance
 
 
 def log(msg: str) -> None:
@@ -133,21 +135,21 @@ def log(msg: str) -> None:
 
 
 # -----------------------------------------------------------------------------
-# 1. 2025 데이터 전처리 (Phase 2 파이프라인 정확히 재현)
+# 1. Preprocess 2025 data (exact reproduction of Phase 2 pipeline)
 # -----------------------------------------------------------------------------
 def preprocess_2025(df_2025: pd.DataFrame, features_meta: dict, scaler_obj: dict) -> pd.DataFrame:
-    """2025 BIP 데이터를 Phase 2와 동일한 인코딩/imputation/스케일링/Feature Selection 으로 전처리.
+    """Preprocess 2025 BIP data with the same encoding/imputation/scaling/feature selection as Phase 2.
 
-    핵심: Phase 2 의 transform 만 적용 (fit 금지) — Phase 2 train 분포에 맞춰 변환해야
-    Phase 4 최종 모델(LGBM + Isotonic)의 입력 분포와 일치한다.
+    Key point: apply transform only (no fit) — must transform against the Phase 2 train distribution
+    so that the input distribution matches Phase 4's final model (LGBM + Isotonic).
     """
     log("\n[preprocess] 2025 데이터 전처리 — Phase 2 transform 정확 재현 ...")
 
-    # (1) encoding (step2 build_raw_feature_matrix 그대로)
+    # (1) encoding (same as step2 build_raw_feature_matrix)
     X_raw, _ = build_raw_feature_matrix(df_2025)
     log(f"  encoding 후 shape: {X_raw.shape}")
 
-    # (2) imputation — Phase 2 train median 사용 (사용자 결정 #2 in Phase 2: Train median fill)
+    # (2) imputation — using Phase 2 train median (decision #2 in Phase 2: train median fill)
     medians = features_meta.get("imputation_medians", {})
     n_imputed = 0
     for col, med in medians.items():
@@ -156,25 +158,25 @@ def preprocess_2025(df_2025: pd.DataFrame, features_meta: dict, scaler_obj: dict
             n_imputed += 1
     log(f"  imputation 적용 컬럼: {n_imputed} (Phase 2 train median)")
 
-    # (3) one-hot 컬럼 일치 보정 — 2025 데이터에서 누락된 카테고리는 0 으로
+    # (3) align one-hot columns — missing categories in 2025 data filled with 0
     scale_cols_all = scaler_obj["scale_cols_all"]
     for col in scale_cols_all:
         if col not in X_raw.columns:
-            X_raw[col] = 0.0  # 누락 카테고리 → 0
+            X_raw[col] = 0.0  # missing category → 0
     # (4) RobustScaler transform
     scaler = scaler_obj["scaler"]
     X_raw[scale_cols_all] = scaler.transform(X_raw[scale_cols_all])
     log(f"  RobustScaler transform 적용 컬럼: {len(scale_cols_all)}")
 
-    # (5) X_advanced_final 컬럼만 선택 (Phase 2 최종 62개)
+    # (5) select only X_advanced_final columns (Phase 2 final 62 features)
     X_advanced_final = features_meta["X_advanced_final"]
     for col in X_advanced_final:
         if col not in X_raw.columns:
-            X_raw[col] = 0.0  # one-hot 누락 보정
+            X_raw[col] = 0.0  # fill missing one-hot columns
     X_final = X_raw[X_advanced_final].copy()
     log(f"  X_advanced_final 선택: {X_final.shape}")
 
-    # 결측 0 보정 (혹시 남은 NaN)
+    # Fill residual NaN with 0 (if any remain)
     n_nan = int(X_final.isna().sum().sum())
     if n_nan > 0:
         log(f"  ⚠️ 잔여 NaN {n_nan} 개 → 0 으로 채움")
@@ -184,13 +186,13 @@ def preprocess_2025(df_2025: pd.DataFrame, features_meta: dict, scaler_obj: dict
 
 
 # -----------------------------------------------------------------------------
-# 2. Phase 4 최종 모델 (LGBM + Isotonic, OOF Brier=0.13092) 으로 타구별 ca-xBA 예측
+# 2. Predict per-pitch ca-xBA using Phase 4 final model (LGBM + Isotonic, OOF Brier=0.13092)
 # -----------------------------------------------------------------------------
 def predict_ca_xba(X_2025: pd.DataFrame) -> tuple[np.ndarray, dict]:
-    """타구별 ca-xBA (안타 확률) 예측.
+    """Predict per-pitch ca-xBA (hit probability).
 
-    Phase 4 최종 모델: **LGBM + Isotonic** (cv='prefit' 패턴, 오캄의 면도날 자동 선정).
-    final_model.joblib 은 dict 형태:
+    Phase 4 final model: **LGBM + Isotonic** (cv='prefit' pattern, selected by Occam's razor).
+    final_model.joblib is a dict:
         {"type": "best_single_isotonic_prefit",
          "base_kind": "lgbm",
          "base_estimator": <fitted LGBM>,
@@ -200,7 +202,7 @@ def predict_ca_xba(X_2025: pd.DataFrame) -> tuple[np.ndarray, dict]:
     log(f"\n[predict] Phase 4 final_model 로드 + ca-xBA 산출 ...")
     final_model = joblib.load(FINAL_MODEL)
 
-    # dict 케이스 처리 — type 별로 흐름 분기
+    # Handle dict case — branch by type
     model_meta: dict = {"path": str(FINAL_MODEL.relative_to(ROOT))}
     if isinstance(final_model, dict):
         mtype = final_model.get("type", "unknown")
@@ -228,7 +230,7 @@ def predict_ca_xba(X_2025: pd.DataFrame) -> tuple[np.ndarray, dict]:
         else:
             raise RuntimeError(f"final_model dict 의 알 수 없는 type: {mtype}")
     else:
-        # 순수 sklearn estimator (fallback)
+        # Plain sklearn estimator (fallback)
         model_meta["type"] = "sklearn_estimator"
         model_meta["pipeline"] = "model.predict_proba"
         log("  → model.predict_proba (legacy estimator)")
@@ -241,18 +243,18 @@ def predict_ca_xba(X_2025: pd.DataFrame) -> tuple[np.ndarray, dict]:
 
 
 # -----------------------------------------------------------------------------
-# 3. 선수별 ca-xBA 집계 (BIP 단순 평균, 사용자 결정 #2)
+# 3. Aggregate ca-xBA per player (simple BIP mean, decision #2)
 # -----------------------------------------------------------------------------
 def aggregate_per_player(df_2025: pd.DataFrame, ca_xba: np.ndarray) -> pd.DataFrame:
-    """선수별 ca-xBA = Σ(타구별 proba) / Σ(BIP 수). PA 가중 금지.
+    """Per-player ca-xBA = Σ(per-pitch proba) / Σ(BIP count). PA weighting prohibited.
 
-    ca-xBA 는 타구 본연의 퀄리티 지표이므로 분모를 BIP 로 한정.
+    ca-xBA is a pure contact-quality metric, so the denominator is restricted to BIP.
 
-    추가: **BIP-only BABIP** 계산 (사용자 요청 #3 — BABIP 운 교차 검증).
-        BABIP_BIP = (안타 − 홈런) / (BIP − 홈런)
-        - 분자: events ∈ {single, double, triple} 인 row 수
-        - 분모: 전체 BIP − events == "home_run" 수
-        - sac_fly 도 BIP 에 포함되어 분모 계산에 자연스럽게 들어감 (학술 표준 BABIP 와 동등)
+    Additionally: compute **BIP-only BABIP** (user request #3 — BABIP luck cross-validation).
+        BABIP_BIP = (hits − HRs) / (BIP − HRs)
+        - Numerator: rows where events ∈ {single, double, triple}
+        - Denominator: total BIP − events == "home_run" count
+        - sac_fly is naturally included in BIP and thus in the denominator (equivalent to academic standard BABIP)
     """
     log("\n[aggregate] 선수별 ca-xBA + BIP-only BABIP 집계 ...")
     df = df_2025[["batter", "events"]].copy()
@@ -273,10 +275,10 @@ def aggregate_per_player(df_2025: pd.DataFrame, ca_xba: np.ndarray) -> pd.DataFr
         .reset_index()
         .rename(columns={"batter": "mlbam_id"})
     )
-    # BABIP = (안타 − HR) / (BIP − HR) (학술 표준)
+    # BABIP = (hits - HR) / (BIP - HR) (academic standard)
     denom_babip = (grouped["our_bip"] - grouped["n_hr"]).clip(lower=1)
     grouped["babip"] = grouped["n_hit_no_hr"] / denom_babip
-    # BIP-AVG = (안타, HR 포함) / BIP — ca-xBA 와 분모 통일 (luck 정통 baseline)
+    # BIP-AVG = (hits incl. HR) / BIP — same denominator as ca-xBA (orthodox luck baseline)
     grouped["bip_avg"] = grouped["n_hit_total"] / grouped["our_bip"].clip(lower=1)
 
     log(f"  선수 수: {len(grouped):,d}")
@@ -290,14 +292,14 @@ def aggregate_per_player(df_2025: pd.DataFrame, ca_xba: np.ndarray) -> pd.DataFr
 
 
 # -----------------------------------------------------------------------------
-# 4. expected_stats 매칭 + BIP 정의 일치 검증 (사용자 결정 #4, #8)
+# 4. Match expected_stats + validate BIP definition consistency (decisions #4, #8)
 # -----------------------------------------------------------------------------
 def match_and_validate(player_ca_xba: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
-    """expected_stats.csv 와 MLBAM ID 직접 조인 (fuzzy 금지).
+    """Match expected_stats.csv via direct MLBAM ID join (fuzzy matching prohibited).
 
-    BIP 정의 일치 검증: 우리 BIP <= csv.bip (= Baseball Savant BBE) 가 일반적.
-    차이 원인 = ATH 홈경기 제외 + |la|>60 컷오프 + 핵심 결측 제거 (Phase 1 결정).
-    strict equality 가 아닌 "ratio ≥ tolerance" 로 검증.
+    BIP definition consistency check: our BIP <= csv.bip (= Baseball Savant BBE) is generally expected.
+    Causes of the gap: ATH home-game exclusion + |la|>60 cutoff + key missing-value removal (Phase 1 decisions).
+    Validated with "ratio >= tolerance" rather than strict equality.
     """
     log("\n[match] expected_stats.csv 매칭 + BIP 정의 일치 assert ...")
     es = pd.read_csv(VALIDATION_GT_CSV, encoding="utf-8-sig")
@@ -310,7 +312,7 @@ def match_and_validate(player_ca_xba: pd.DataFrame) -> tuple[pd.DataFrame, dict]
     log(f"  매칭 결과: {n_matched}/{len(es)} 명 (누락 {n_missing} 명 — 2025 데이터에 BIP 없음)")
     merged = merged[merged["_merge"] == "both"].drop(columns=["_merge"]).copy()
 
-    # BIP 정의 일치 검증
+    # BIP definition consistency check
     merged["bip_ratio"] = merged["our_bip"] / merged["bip"]
     violations = merged[merged["bip_ratio"] < BIP_TOLERANCE_FRACTION]
     log(f"\n  BIP 일치 분석:")
@@ -324,8 +326,8 @@ def match_and_validate(player_ca_xba: pd.DataFrame) -> tuple[pd.DataFrame, dict]
             log(f"      {r['last_name, first_name']:35s} our_bip={int(r['our_bip']):4d} / "
                 f"csv.bip={int(r['bip']):4d}  ratio={r['bip_ratio']:.3f}")
 
-    # ATH 홈경기 제외 영향: 비율이 매우 낮은 선수는 ATH 소속일 가능성
-    # 그래도 분석에는 포함 (원정 경기 BIP 만으로 ca-xBA 산출)
+    # ATH home-game exclusion effect: players with very low ratios are likely ATH roster members
+    # Still included in analysis (ca-xBA computed from away-game BIPs only)
     assert merged["bip_ratio"].max() <= 1.05, \
         "우리 BIP > csv.bip 인 선수 존재 — Phase 1 BIP 정의 불일치 가능성 (큰 문제)"
 
@@ -342,33 +344,33 @@ def match_and_validate(player_ca_xba: pd.DataFrame) -> tuple[pd.DataFrame, dict]
 
 
 # -----------------------------------------------------------------------------
-# 5. 운(Luck) 분석 (사용자 결정 #7)
+# 5. Luck analysis (decision #7)
 # -----------------------------------------------------------------------------
 def luck_analysis(merged: pd.DataFrame, career_babip_map: dict) -> dict:
-    """luck = BIP-AVG − ca-xBA (분모 통일 — 학술 정통 정의).
+    """luck = BIP-AVG − ca-xBA (unified denominator — academically orthodox definition).
 
-    양수 = 실제 BIP 안타 비율이 모델 예측보다 높음 → 운/행운에 의한 효과 가설.
-    음수 = 실제 BIP 안타 비율이 예측보다 낮음 → 호수비·구장 환경 손해 가설.
+    Positive = actual BIP hit rate is higher than model prediction → hypothesized lucky/fortunate effect.
+    Negative = actual BIP hit rate is lower than prediction → hypothesized poor defense or park environment penalty.
 
-    **분모 통일의 학술적 의의**:
-        - 이전 `luck = AVG − ca-xBA` 는 AVG(분모: AB) vs ca-xBA(분모: BIP) 의
-          비대칭으로 인해 음수 시프트(평균 −0.10)가 발생했으며, 이 시프트는
-          본질적으로 선수의 삼진율을 반영하는 부산물이었다.
-        - 본 정의 `luck = BIP-AVG − ca-xBA` 는 둘 다 분모를 BIP 로 통일하여
-          삼진율 영향을 제거하고 순수 contact quality 대비 결과를 비교한다.
-        - 의미: "이 정도 contact quality 였으면 BIP 중 X% 안타가 나왔어야 하는데
-          실제로는 Y% 였다" → 절대값 자체가 해석 가능 (음수 시프트 없음).
+    **Academic significance of denominator unification**:
+        - The previous `luck = AVG − ca-xBA` had asymmetric denominators: AVG (denominator: AB) vs
+          ca-xBA (denominator: BIP), causing a systematic negative shift (mean −0.10). This shift
+          essentially reflected each player's strikeout rate as a side effect.
+        - The new definition `luck = BIP-AVG − ca-xBA` unifies both denominators to BIP, removing
+          the strikeout-rate influence and comparing pure contact quality against actual outcomes.
+        - Interpretation: "Given this level of contact quality, X% of BIPs should have been hits,
+          but actually Y% were" → the absolute value is directly interpretable (no negative shift).
 
-    **통산 BABIP 교차 검증**:
-        야구에서 BABIP 자체가 높다고 곧 "행운"이 아니다. 진정한 행운 진단은
-        **시즌 BABIP − 자기 통산 BABIP** (개인 baseline 대비 편차) 로 본다.
+    **Career BABIP cross-validation**:
+        In baseball, a high seasonal BABIP alone does not imply "luck." True luck diagnosis requires
+        **seasonal BABIP − own career BABIP** (deviation from personal baseline).
     """
     log("\n[luck] 운(Luck) 분석 — BIP-AVG − ca-xBA (분모 통일) + 통산 BABIP 교차 검증 ...")
     merged = merged.copy()
-    # 분모 통일 luck 정의 — BIP-AVG (= n_hit_total / our_bip) 사용
+    # Unified-denominator luck definition — using BIP-AVG (= n_hit_total / our_bip)
     merged["luck"] = merged["bip_avg"] - merged["ca_xba"]
 
-    # 통산 BABIP 매핑
+    # Map career BABIP
     merged["career_babip"] = merged["mlbam_id"].map(
         lambda pid: (career_babip_map.get(int(pid)) or {}).get("babip", float("nan"))
     )
@@ -377,13 +379,13 @@ def luck_analysis(merged: pd.DataFrame, career_babip_map: dict) -> dict:
     )
     merged["babip_minus_career"] = merged["babip"] - merged["career_babip"]
 
-    # 보조: 리그 평균 BABIP (분석군 BIP-가중) — 통산 baseline 보조 비교용
+    # Auxiliary: league-average BABIP (BIP-weighted for analysis group) — supplementary comparison against career baseline
     league_babip = float(
         (merged["babip"] * merged["our_bip"]).sum() / merged["our_bip"].sum()
     )
     merged["babip_minus_league"] = merged["babip"] - league_babip
 
-    # 통산 BABIP 매핑 성공률
+    # Career BABIP mapping success rate
     n_with_career = int(merged["career_babip"].notna().sum())
     log(f"  통산 BABIP 매핑 성공: {n_with_career}/{len(merged)} 명")
     log(f"  luck 분포: mean={merged['luck'].mean():+.4f}, std={merged['luck'].std():.4f}")
@@ -418,7 +420,7 @@ def luck_analysis(merged: pd.DataFrame, career_babip_map: dict) -> dict:
         log(f"    {r['last_name, first_name']:30s} AVG={r['ba']:.3f}  ca-xBA={r['ca_xba']:.3f}  "
             f"luck={r['luck']:+.3f}  시즌BABIP={r['babip']:.3f}  통산BABIP={cb_str}  Δ={delta_str}")
 
-    # 상관계수: luck vs (시즌 BABIP), luck vs (시즌 − 통산 BABIP 편차)
+    # Correlations: luck vs (seasonal BABIP), luck vs (seasonal - career BABIP delta)
     valid_career = merged.dropna(subset=["career_babip"])
     luck_babip_pearson = float(merged["luck"].corr(merged["babip"], method="pearson"))
     luck_babip_spearman = float(merged["luck"].corr(merged["babip"], method="spearman"))
@@ -462,14 +464,14 @@ def luck_analysis(merged: pd.DataFrame, career_babip_map: dict) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# 6. 메인 상관관계 + 보너스 (사용자 결정 #1, #10)
+# 6. Main correlations + bonus (decisions #1, #10)
 # -----------------------------------------------------------------------------
 def compute_correlations(merged: pd.DataFrame) -> dict:
-    """1:1 R² 대조 — ca-xBA vs wOBA / xBA vs wOBA.
+    """1:1 R² comparison — ca-xBA vs wOBA / xBA vs wOBA.
 
-    Phase 5 readme 이론적 배경: well-calibrated probability 평균 → wOBA 강한 양의 상관.
-    ⚠️ xwOBA(est_woba) 는 wOBA 자체를 예측하는 Statcast 지표 → 동어반복적·체급 불일치로
-    R² 1:1 비교에서 제외 (readme Phase 5 검증 구도 확정, 2026-05-29).
+    Phase 5 readme theoretical background: well-calibrated probability average → strong positive correlation with wOBA.
+    ⚠️ xwOBA (est_woba) is a Statcast metric that directly predicts wOBA → tautological / mismatched scope,
+    excluded from the 1:1 R² comparison (readme Phase 5 validation setup confirmed, 2026-05-29).
     """
     log("\n[correlation] 1:1 R² 대조 — ca-xBA vs wOBA / xBA vs wOBA ...")
     results = {}
@@ -498,16 +500,16 @@ def compute_correlations(merged: pd.DataFrame) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# 7. 포지션 fetch (사용자 결정 #5 + 추가 결정 #9)
+# 7. Position fetch (decisions #5 and #9)
 # -----------------------------------------------------------------------------
 def fetch_positions(mlbam_ids: list[int]) -> dict[int, str]:
-    """MLB Stats API 로 시즌 최다 출장 포지션 조회. 캐시 활용.
+    """Fetch most-played position per season via MLB Stats API. Utilizes cache.
 
     statsapi.mlb.com/api/v1/people/{id}/stats?stats=season&season=2025&group=fielding
     """
     log(f"\n[positions] MLB Stats API 로 {len(mlbam_ids)} 명 포지션 조회 (캐시 활용) ...")
 
-    # 캐시 로드
+    # Load cache
     cache = {}
     if POSITIONS_CACHE.exists():
         cache = {int(k): v for k, v in json.loads(POSITIONS_CACHE.read_text()).items()}
@@ -532,7 +534,7 @@ def fetch_positions(mlbam_ids: list[int]) -> dict[int, str]:
                 if not splits:
                     cache[pid] = None
                     continue
-                # 출장 게임 수 최다 포지션 (시즌 최다 출장 기준, 사용자 결정 #5)
+                # Position with the most games played in the season (decision #5)
                 best = max(splits, key=lambda s: s.get("stat", {}).get("games", 0))
                 pos_abbr = best.get("position", {}).get("abbreviation")
                 cache[pid] = pos_abbr
@@ -541,7 +543,7 @@ def fetch_positions(mlbam_ids: list[int]) -> dict[int, str]:
                 cache[pid] = None
             time.sleep(STATSAPI_DELAY_SEC)
 
-        # 캐시 저장
+        # Save cache
         POSITIONS_CACHE.write_text(json.dumps({str(k): v for k, v in cache.items()}, indent=2))
         log(f"  캐시 저장 완료: {POSITIONS_CACHE.relative_to(ROOT)}")
 
@@ -549,16 +551,16 @@ def fetch_positions(mlbam_ids: list[int]) -> dict[int, str]:
 
 
 # -----------------------------------------------------------------------------
-# 7b. 통산 BABIP fetch (MLB Stats API career hitting stats, 캐시 활용)
-#     도메인 정통 해석: "운/행운에 의한 효과" = 시즌 BABIP − 자기 통산 BABIP
+# 7b. Fetch career BABIP (MLB Stats API career hitting stats, with cache)
+#     Orthodox domain interpretation: "lucky/fortunate effect" = seasonal BABIP - own career BABIP
 # -----------------------------------------------------------------------------
 def fetch_career_babip(mlbam_ids: list[int]) -> dict[int, dict | None]:
-    """MLB Stats API 로 선수별 통산 hitting stats fetch → 통산 BABIP 계산. 캐시 활용.
+    """Fetch per-player career hitting stats via MLB Stats API → compute career BABIP. Utilizes cache.
 
     endpoint: statsapi.mlb.com/api/v1/people/{id}/stats?stats=career&group=hitting&sportId=1
-    BABIP 계산: API 가 직접 제공하는 babip 필드 사용 (수동 (H-HR)/(AB-K-HR+SF) 와 일치 검증됨).
+    BABIP computation: uses the babip field provided directly by the API (verified to match manual (H-HR)/(AB-K-HR+SF)).
 
-    반환: {pid: {"babip": float, "pa": int, "ab": int} | None}
+    Returns: {pid: {"babip": float, "pa": int, "ab": int} | None}
     """
     log(f"\n[career_babip] MLB Stats API 통산 hitting 통계 fetch ({len(mlbam_ids)} 명, 캐시 활용) ...")
 
@@ -587,9 +589,9 @@ def fetch_career_babip(mlbam_ids: list[int]) -> dict[int, dict | None]:
                 if not splits:
                     cache[pid] = None
                     continue
-                # 통산 split — sportId=1 (MLB) 라 단일 split 반환
+                # Career split — sportId=1 (MLB) returns a single split
                 s = splits[-1].get("stat", {})
-                # API 가 .338 같은 문자열로 반환 → float 변환
+                # API returns string like ".338" → convert to float
                 babip_str = s.get("babip", "")
                 try:
                     babip_val = float(babip_str) if babip_str else float("nan")
@@ -608,7 +610,7 @@ def fetch_career_babip(mlbam_ids: list[int]) -> dict[int, dict | None]:
         )
         log(f"  캐시 저장: {CAREER_BABIP_CACHE.relative_to(ROOT)}")
 
-    # 통계 요약
+    # Statistics summary
     valid = [v for v in cache.values() if v and not (v.get("babip") != v.get("babip"))]
     if valid:
         babips = [v["babip"] for v in valid]
@@ -621,28 +623,28 @@ def fetch_career_babip(mlbam_ids: list[int]) -> dict[int, dict | None]:
 
 
 # -----------------------------------------------------------------------------
-# 8. 실버 슬러거 검증 (사용자 결정 #5, #6 + 추가 결정 #9)
+# 8. Silver Slugger validation (decisions #5, #6 and #9)
 # -----------------------------------------------------------------------------
-# Baseball Savant 표기 → 우리 통일 포지션 (실버 슬러거 명단의 9 종)
+# Baseball Savant notation → unified position codes (9 Silver Slugger categories)
 POSITION_ALIASES = {
     "C": ["C"], "1B": ["1B"], "2B": ["2B"], "SS": ["SS"], "3B": ["3B"],
     "OF": ["LF", "CF", "RF", "OF"],
     "DH": ["DH"],
-    "Util": [],  # Util 은 다중 포지션 — 별도 처리
+    "Util": [],  # Util covers multiple positions — handled separately
 }
 
 
 def silver_slugger_validation(merged: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
-    """실버 슬러거 20명 vs 포지션별 ca-xBA Top N 교차 검증.
+    """Cross-validate 20 Silver Slugger winners against position-by-position ca-xBA Top N.
 
-    각 포지션 부문에서 우리 ca-xBA Top N 안에 실제 실버 슬러거 수상자가 들어있는지 확인.
-    hit rate (수상자가 Top N 에 포함된 비율) 산출.
+    Check whether the actual Silver Slugger winner in each position category falls within our ca-xBA Top N.
+    Compute hit rate (fraction of winners who appear in Top N).
     """
     log("\n[silver_slugger] 실버 슬러거 검증 — 포지션별 ca-xBA Top N vs 수상자 ...")
     ss = pd.read_csv(SILVER_SLUGGER_CSV)
     log(f"  실버 슬러거 명단: {len(ss)} 명")
 
-    # silver_slugger 의 player_name → expected_stats 의 'last_name, first_name' → MLBAM ID
+    # silver_slugger player_name → expected_stats 'last_name, first_name' → MLBAM ID
     es_index = {}
     for _, r in merged.iterrows():
         full = str(r["last_name, first_name"])
@@ -658,20 +660,20 @@ def silver_slugger_validation(merged: pd.DataFrame) -> tuple[pd.DataFrame, dict]
         missing = ss[ss["mlbam_id"].isna()]
         log(f"  ⚠️ 매칭 누락: {missing['player_name'].tolist()} (250 PA 미만 또는 표기 차이)")
 
-    # 각 수상자의 ca-xBA 전체 랭킹 + 백분위
+    # Overall ca-xBA ranking + percentile for each winner
     merged_sorted = merged.sort_values("ca_xba", ascending=False).reset_index(drop=True)
     merged_sorted["overall_rank"] = merged_sorted.index + 1
     merged_sorted["overall_percentile"] = (
         1 - (merged_sorted["overall_rank"] - 1) / len(merged_sorted)
     ) * 100
 
-    # 실버 슬러거에 overall_rank, ca_xba, woba 등 부여
+    # Attach overall_rank, ca_xba, woba, etc. to Silver Slugger entries
     ss_full = ss.merge(
         merged_sorted[["mlbam_id", "ca_xba", "woba", "ba", "overall_rank", "overall_percentile"]],
         on="mlbam_id", how="left",
     )
 
-    # 포지션별 ca-xBA Top N 리더보드 (포지션 정보는 별도 fetch 결과 join)
+    # Position-by-position ca-xBA Top N leaderboard (position info joined from separate fetch result)
     results = {
         "ss_full": ss_full,
         "merged_sorted": merged_sorted,
@@ -682,18 +684,18 @@ def silver_slugger_validation(merged: pd.DataFrame) -> tuple[pd.DataFrame, dict]
 def attach_positions_and_leaderboard(
     ss_full: pd.DataFrame, merged_sorted: pd.DataFrame, position_map: dict[int, str]
 ) -> tuple[pd.DataFrame, dict]:
-    """포지션 fetch 결과를 매칭하고 포지션별 Top N 리더보드 구성."""
+    """Match position fetch results and build position-by-position Top N leaderboard."""
     log("\n[silver_slugger] 포지션 매칭 + 포지션별 Top N 리더보드 ...")
     merged_sorted = merged_sorted.copy()
     merged_sorted["position_mlbam"] = merged_sorted["mlbam_id"].map(position_map)
 
-    # 포지션 분포
+    # Position distribution
     pos_dist = merged_sorted["position_mlbam"].value_counts(dropna=False)
     log(f"  포지션 분포 (전체 {len(merged_sorted)} 명):")
     for pos, n in pos_dist.head(15).items():
         log(f"    {str(pos):8s}: {n}")
 
-    # 포지션별 Top N 리더보드
+    # Position-by-position Top N leaderboard
     leaderboards = {}
     for ss_pos, statsapi_pos_list in POSITION_ALIASES.items():
         if not statsapi_pos_list:
@@ -701,7 +703,7 @@ def attach_positions_and_leaderboard(
         pool = merged_sorted[merged_sorted["position_mlbam"].isin(statsapi_pos_list)].copy()
         leaderboards[ss_pos] = pool.head(POSITION_TOPN)
 
-    # 각 실버 슬러거 수상자의 포지션별 ca-xBA 순위
+    # Per-position ca-xBA rank for each Silver Slugger winner
     ss_full = ss_full.copy()
     ss_full["position_mlbam"] = ss_full["mlbam_id"].map(position_map)
     ss_full["position_rank"] = None
@@ -719,7 +721,7 @@ def attach_positions_and_leaderboard(
             ss_full.at[idx, "position_rank"] = rank
             ss_full.at[idx, "position_topN"] = rank <= POSITION_TOPN
 
-    # 검증 결과 요약
+    # Validation result summary
     log(f"\n  실버 슬러거 포지션 Top {POSITION_TOPN} 적중 결과:")
     for _, r in ss_full.iterrows():
         rank = r["position_rank"]
@@ -748,7 +750,7 @@ def attach_positions_and_leaderboard(
 
 
 # -----------------------------------------------------------------------------
-# 9. 리포트
+# 9. Report
 # -----------------------------------------------------------------------------
 def write_report(
     qc: dict, correlations: dict, luck: dict, ss_full: pd.DataFrame,
@@ -1072,7 +1074,7 @@ def main():
     log("Phase 5: 최종 지표(ca-xBA) 산출 및 세이버메트릭스 가치 검증")
     log("=" * 80)
 
-    # 1. 데이터 로드
+    # 1. Load data
     log("\n[1/9] 데이터 로드 ...")
     df_2025 = pd.read_parquet(DATA_2025_PARQUET)
     features_meta = json.loads(PHASE2_FEATURES_JSON.read_text(encoding="utf-8"))
@@ -1080,38 +1082,38 @@ def main():
     log(f"  2025 BIP: {df_2025.shape}")
     log(f"  X_advanced_final: {len(features_meta['X_advanced_final'])} 변수")
 
-    # 2. 전처리
+    # 2. Preprocess
     X_2025 = preprocess_2025(df_2025, features_meta, scaler_obj)
 
-    # 3. 예측 (LGBM + Isotonic, Phase 4 OOF Brier=0.13092)
+    # 3. Predict (LGBM + Isotonic, Phase 4 OOF Brier=0.13092)
     ca_xba, model_meta = predict_ca_xba(X_2025)
 
-    # 4. 선수별 집계
+    # 4. Aggregate per player
     player_ca_xba = aggregate_per_player(df_2025, ca_xba)
 
-    # 5. 매칭 + assert
+    # 5. Match + assert
     merged, qc = match_and_validate(player_ca_xba)
 
-    # 5b. 통산 BABIP fetch (개인 baseline 확보)
+    # 5b. Fetch career BABIP (to establish personal baseline)
     career_babip_map = fetch_career_babip(merged["mlbam_id"].astype(int).tolist())
 
-    # 6. 운 분석 (시즌 BABIP − 통산 BABIP 편차 = 도메인 정통 행운 시그널)
+    # 6. Luck analysis (seasonal BABIP - career BABIP delta = orthodox domain luck signal)
     luck = luck_analysis(merged, career_babip_map)
     merged = luck["merged_with_luck"]
 
-    # 7. 상관관계
+    # 7. Correlations
     correlations = compute_correlations(merged)
 
-    # 8. 포지션 fetch
+    # 8. Position fetch
     position_map = fetch_positions(merged["mlbam_id"].tolist())
 
-    # 9. 실버 슬러거 검증
+    # 9. Silver Slugger validation
     ss_full, ss_inter = silver_slugger_validation(merged)
     ss_full, ss_summary = attach_positions_and_leaderboard(
         ss_full, ss_inter["merged_sorted"], position_map
     )
 
-    # 산출물 저장
+    # Save outputs
     log("\n[save] 산출물 저장 ...")
     merged_out = merged.copy()
     merged_out["position_mlbam"] = merged_out["mlbam_id"].map(position_map)
@@ -1143,7 +1145,7 @@ def main():
     log(f"  → {SILVER_SLUGGER_VAL_CSV.relative_to(ROOT)}")
     log(f"  → {RESULTS_JSON.relative_to(ROOT)}")
 
-    # 리포트
+    # Report
     write_report(qc, correlations, luck, ss_full, ss_summary, len(merged),
                  model_meta=model_meta, phase4_final_oof_brier=FINAL_MODEL_OOF_BRIER)
 

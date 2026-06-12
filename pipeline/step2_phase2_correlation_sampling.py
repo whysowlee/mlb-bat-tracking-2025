@@ -1,27 +1,27 @@
 """
-Phase 2: 상관관계 분석, 스케일링, 최적 샘플링 도출, Feature Selection
-=====================================================================
+Phase 2: Correlation Analysis, Scaling, Optimal Sampling Selection, Feature Selection
+=====================================================================================
 
-**2024_data.parquet 만** 사용한다. 2025_data 는 Phase 5까지 격리.
+Uses **2024_data.parquet only**. 2025_data is isolated until Phase 5.
 
-핵심 작업 흐름 (Phase 1 dome-masking 이후 재설계):
-  1) 변수 그룹 정의 (X_base 2종 / X_advanced 초기 ~70종)
-  2) 카테고리 인코딩 (stand/p_throws → binary, pitch_type/alignment → one-hot)
-  3) NaN 처리 — numeric: median imputation (full 2024 — CV 평균 효과)
-  4) Robust Scaler 적용 (numeric only)
-  5) 다중공선성 제거 |r| > 0.95 (Pearson)
-     - 도메인 우선순위 drop: derived(effective_speed, api_break_*,
+Core workflow (redesigned after Phase 1 dome-masking):
+  1) Feature group definition (X_base 2 features / X_advanced initial ~70 features)
+  2) Categorical encoding (stand/p_throws → binary, pitch_type/alignment → one-hot)
+  3) NaN handling — numeric: median imputation (full 2024 — averaging effect across CV)
+  4) Robust Scaler applied (numeric only)
+  5) Multicollinearity removal |r| > 0.95 (Pearson)
+     - Domain-priority drop: derived features (effective_speed, api_break_*,
        wx_wind_gusts_10m, max_wall_height) → variance fallback
-  6) 샘플링 비교 (None / RUS / SMOTE) — XGBoost default, 5-fold CV
-     OOF predict_proba 로 Brier(주) + LogLoss + F1 + AUC, fold mean±SD
-  7) Feature Selection — best sampling 위에서:
+  6) Sampling comparison (None / RUS / SMOTE) — XGBoost default, 5-fold CV
+     OOF predict_proba → Brier (primary) + LogLoss + F1 + AUC, fold mean±SD
+  7) Feature Selection — on best sampling:
      RF RandomizedSearchCV → feature_importances_ (split impurity)
-     + MI (30K stratified) → 2개 모두 하위 30% 동시 진입 시 drop
-     (Permutation Importance 는 macOS joblib memmap 디스크 한계로 미채택)
-  8) phase2_features.json, scaler, X/y parquet 저장
-  9) phase2_report.md 자동 생성
+     + MI (30K stratified) → drop if both rank in bottom 30% simultaneously
+     (Permutation Importance excluded due to macOS joblib memmap disk limitations)
+  8) Save phase2_features.json, scaler, X/y parquet
+  9) Auto-generate phase2_report.md
 
-실행:
+Run:
     /opt/miniconda3/envs/mlb-xba/bin/python pipeline/step2_phase2_correlation_sampling.py
 """
 
@@ -63,7 +63,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # -----------------------------------------------------------------------------
-# 경로
+# Paths
 # -----------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_DIR = ROOT / "pipeline"
@@ -78,15 +78,15 @@ SCALER_PATH = OUTPUT_DIR / "phase2_scaler.joblib"
 FS_RANK_CSV = OUTPUT_DIR / "phase2_fs_ranking.csv"
 
 # -----------------------------------------------------------------------------
-# 결정 상수 (사용자 컨펌 — Phase 1 재실행 이후 분기 전수 재확인)
+# Decision constants (user-confirmed — all branches re-verified after Phase 1 re-run)
 # -----------------------------------------------------------------------------
 RANDOM_STATE = 42
 CV_FOLDS = 5
 CORR_THRESHOLD = 0.95
-FS_DROP_RANK_THRESHOLD = 0.70  # 하위 30% (rank percentile > 0.7) 동시 진입 시 drop
+FS_DROP_RANK_THRESHOLD = 0.70  # Drop if both metrics rank in bottom 30% (rank percentile > 0.7)
 MI_SUBSAMPLE_SIZE = 30_000
 
-# RF — Feature importance 산출용 RandomizedSearchCV (이전 step2 방식 복원)
+# RF — RandomizedSearchCV for feature importance computation (restored from previous step2 approach)
 RF_SEARCH_SPACE = {
     "n_estimators": [100, 200, 500],
     "max_depth": [10, 20, None],
@@ -96,12 +96,12 @@ RF_SEARCH_SPACE = {
 RF_SEARCH_N_ITER = 20
 RF_SEARCH_CV = 3
 
-# 발열 관리
+# Thermal management
 COOLDOWN_SEC = 20
 N_JOBS_HEAVY = 2
 
 # -----------------------------------------------------------------------------
-# 변수 그룹 정의 (Phase 1 데이터 — dome-masked weather 포함)
+# Feature group definitions (Phase 1 data — includes dome-masked weather)
 # -----------------------------------------------------------------------------
 X_BASE = ["launch_speed", "launch_angle"]
 
@@ -182,7 +182,7 @@ NUMERIC_FEATURES = (
 BINARY_LR = ["stand", "p_throws"]
 CATEGORICAL_OHE = ["pitch_type", "if_fielding_alignment", "of_fielding_alignment"]
 
-# 도메인 derived 명시 (|r|>0.95 시 먼저 drop 후보)
+# Domain-derived features (drop candidates first when |r| > 0.95)
 DERIVED_EXACT = {"effective_speed", "wx_wind_gusts_10m", "max_wall_height"}
 DERIVED_PREFIX = ("api_break_",)
 
@@ -197,7 +197,7 @@ def is_derived(col: str) -> bool:
 
 
 # -----------------------------------------------------------------------------
-# Feature matrix 구성
+# Feature matrix construction
 # -----------------------------------------------------------------------------
 def build_raw_feature_matrix(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     df = df.copy()
@@ -239,12 +239,12 @@ def impute_numeric_with_median(
 
 
 # -----------------------------------------------------------------------------
-# 다중공선성 제거 — 도메인 우선순위
-#   1) 두 변수 모두 X_BASE: 보존
-#   2) 한쪽만 X_BASE: 다른 쪽 drop
-#   3) 한쪽 is_derived, 다른 쪽 source: derived drop
-#   4) 둘 다 derived 또는 둘 다 source: variance fallback (작은 쪽 drop)
-#   5) variance 동률: 알파벳-뒤 drop (deterministic)
+# Multicollinearity removal — domain-priority rules
+#   1) Both features in X_BASE: preserve both
+#   2) Only one is X_BASE: drop the other
+#   3) One is derived, the other is source: drop derived
+#   4) Both derived or both source: variance fallback (drop lower-variance one)
+#   5) Tied variance: drop alphabetically later (deterministic)
 # -----------------------------------------------------------------------------
 def correlation_drop_domain_priority(
     X_scaled: pd.DataFrame, threshold: float
@@ -306,7 +306,7 @@ def correlation_drop_domain_priority(
 
 
 # -----------------------------------------------------------------------------
-# 모델 default — 샘플링 비교용 XGBoost
+# Default model — XGBoost for sampling comparison
 # -----------------------------------------------------------------------------
 def xgb_default() -> xgb.XGBClassifier:
     return xgb.XGBClassifier(
@@ -324,7 +324,7 @@ def cooldown(reason: str = "", sec: int = COOLDOWN_SEC) -> None:
 
 
 # -----------------------------------------------------------------------------
-# 샘플링 비교 (5-fold CV OOF Brier)
+# Sampling comparison (5-fold CV OOF Brier)
 # -----------------------------------------------------------------------------
 def cv_oof_for_sampling(
     X: pd.DataFrame, y: pd.Series, sampling_name: str, sampler
@@ -440,11 +440,11 @@ def feature_selection(
     X: pd.DataFrame, y: pd.Series, drop_rank_threshold: float
 ) -> tuple[dict, list[str], pd.DataFrame, dict, float]:
     """
-    2개 기준 (이전 step2 방식 복원):
+    Two-criterion approach (restored from previous step2 method):
       (1) RF RandomizedSearchCV → best_estimator_.feature_importances_ (split impurity)
       (2) MI on stratified 30K subsample
-    → 둘 다 percentile rank > drop_rank_threshold (하위 30%) 인 변수 drop
-    Permutation Importance 는 macOS joblib memmap 디스크 한계로 미채택.
+    → Drop features where both rank in bottom 30% (percentile rank > drop_rank_threshold)
+    Permutation Importance excluded due to macOS joblib memmap disk limitations.
     """
     print(
         f"  RF RandomizedSearchCV 시작 "
@@ -515,7 +515,7 @@ def feature_selection(
 
 
 # -----------------------------------------------------------------------------
-# 리포트 작성
+# Report generation
 # -----------------------------------------------------------------------------
 def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -528,7 +528,7 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
     L.append("> 본 단계는 **2024_data.parquet 만** 사용한다. 2025_data는 Phase 5까지 격리되어 어떤 통계도 누설되지 않는다.")
     L.append("")
 
-    # 결정 사항
+    # Decisions
     L.append("## 1. 결정 사항 (사용자 컨펌, Phase 1 dome-masking 이후 분기 전수 재확인)")
     L.append("")
     L.append("| # | 결정 항목 | 채택안 | 사유 |")
@@ -555,7 +555,7 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
     L.append(f"| 20 | M2 발열 관리 | 단계 간 `time.sleep({COOLDOWN_SEC}s)`, `n_jobs={N_JOBS_HEAVY}` | 노트북 thermal throttling 완화. |")
     L.append("")
 
-    # Feature Pool 구성
+    # Feature pool construction
     L.append("## 2. 변수 그룹 정의 및 초기 풀 구성")
     L.append("")
     L.append("| 그룹 | 변수 수 | 내용 |")
@@ -587,7 +587,7 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
             L.append(f"| ... 외 {len(meta['imputation_medians']) - 25}개 | |")
     L.append("")
 
-    # CV 구조
+    # CV structure
     L.append(f"## 4. Cross-Validation 구조 ({CV_FOLDS}-fold StratifiedKFold)")
     L.append("")
     L.append(f"- 2024 전체 {meta['n_full']:,}행 → StratifiedKFold(n_splits={CV_FOLDS}, shuffle=True, random_state={RANDOM_STATE})")
@@ -595,7 +595,7 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
     L.append("- **2025는 Phase 5 외부 검증 전용** — 본 단계에서 어떤 통계도 사용하지 않음")
     L.append("")
 
-    # 다중공선성
+    # Multicollinearity
     L.append(f"## 5. 다중공선성 분석 (|r| > {CORR_THRESHOLD}, Pearson)")
     L.append("")
     L.append(f"- 식별된 고상관 쌍: **{len(hi_corr_pairs)}건**")
@@ -624,14 +624,14 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
     L.append(", ".join(f"`{c}`" for c in meta["dropped_via_correlation"]) or "_(없음)_")
     L.append("")
 
-    # 스케일링
+    # Scaling
     L.append("## 6. Robust Scaler")
     L.append("")
     L.append(f"- 스케일 적용 컬럼: **{len(meta['scale_cols'])}**개 (이진 0/1 변수는 제외)")
     L.append(f"- 2024 전체 fit, transform → `pipeline/output/phase2_scaler.joblib`")
     L.append("")
 
-    # 샘플링 비교
+    # Sampling comparison
     L.append(f"## 7. 샘플링 비교 (3종 × XGBoost default × {CV_FOLDS}-fold CV)")
     L.append("")
     L.append("**OOF (Out-Of-Fold) predict_proba 기반 메트릭:**")
@@ -697,7 +697,7 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
     L.append(", ".join(f"`{c}`" for c in meta["dropped_via_feature_selection"]) or "_(없음)_")
     L.append("")
 
-    # 최종 X_advanced
+    # Final X_advanced
     L.append("## 9. 최종 X_advanced 변수 확정")
     L.append("")
     L.append(f"- X_BASE: **{len(X_BASE)}개** — Phase 3 통제군용")
@@ -711,7 +711,7 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
     L.append(", ".join(f"`{c}`" for c in meta["X_advanced_final"]))
     L.append("")
 
-    # 산출물
+    # Artifacts
     L.append("## 10. 산출물")
     L.append("")
     L.append(
@@ -810,16 +810,16 @@ def main():
     rank_df.to_csv(FS_RANK_CSV, index_label="feature")
     print(f"  → FS ranking 저장: {FS_RANK_CSV.relative_to(ROOT)}", flush=True)
 
-    # 최종 X_advanced 확정
+    # Finalize X_advanced
     X_advanced_final = [c for c in X_s.columns if c not in drop_cols_fs]
     print(f"\n[final] X_advanced 최종: {len(X_advanced_final)}개 변수", flush=True)
 
-    # 최종 X 저장 (full 2024, X_advanced_final 만 포함)
+    # Save final X (full 2024, X_advanced_final columns only)
     X_s[X_advanced_final].to_parquet(X_FULL_PARQUET, index=False)
     y.to_frame("is_hit").to_parquet(Y_FULL_PARQUET, index=False)
     print(f"  → 저장: phase2_X_full.parquet, phase2_y_full.parquet", flush=True)
 
-    # 메타 저장
+    # Save metadata
     meta = {
         "X_base": X_BASE,
         "initial_features": list(X.columns),

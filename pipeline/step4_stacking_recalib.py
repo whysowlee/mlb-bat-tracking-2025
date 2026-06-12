@@ -1,31 +1,35 @@
 """
-Phase 4 Stacking Post-hoc Calibration — 정석 재실행 (진단 보강)
-================================================================
+Phase 4 Stacking Post-hoc Calibration — Canonical Re-run (Diagnostic Reinforcement)
+=====================================================================================
 
-**문제 발견 (step4 1차 실행):**
-  기존 `stack.predict_proba(X_train)` (in-sample) → IsotonicRegression fit 방식이
-  test 분포와 mismatch 를 만들어 Brier 0.1345 → 0.1391 악화, LogLoss 0.42 → 0.65 급악화.
+**Problem discovered (step4 first run):**
+  The existing `stack.predict_proba(X_train)` (in-sample) → IsotonicRegression fit approach
+  creates a mismatch with the test distribution, worsening Brier 0.1345 → 0.1391
+  and sharply degrading LogLoss 0.42 → 0.65.
 
-**원인 진단:**
-  StackingClassifier(cv=5) 는 final_estimator 학습에만 OOF 를 사용하고 refit 단계에서
-  base estimators 를 전체 X_train 으로 재학습한다. 따라서 `stack.predict_proba(X_train)` 은
-  base 입장에서 in-sample → overfit. 그 overfit 분포에 Isotonic 을 학습시키면 보정 함수가
-  test 분포에 부적합.
+**Root-cause diagnosis:**
+  StackingClassifier(cv=5) uses OOF only for training the final_estimator; during the
+  refit stage it retrains base estimators on the full X_train. Therefore
+  `stack.predict_proba(X_train)` is in-sample from the bases' perspective → overfit.
+  Fitting IsotonicRegression on that overfit distribution produces a calibration function
+  that is misaligned with the test distribution.
 
-**정석 접근:**
-  CalibratedClassifierCV(stack, method='isotonic', cv=3) — stacking 자체를 cv-fold OOF
-  로 재학습 → 정확한 OOF predictions 에서 Isotonic 학습 → test 분포와 일관.
+**Canonical approach:**
+  CalibratedClassifierCV(stack, method='isotonic', cv=3) — retrain the stacking itself
+  via cv-fold OOF → learn Isotonic from accurate OOF predictions → consistent with
+  test distribution.
 
-**비용:** stacking 한 번 학습 22분 × cv=3 = 약 66분.
+**Cost:** stacking training ×3 ≈ 66 minutes (22 min/run × cv=3).
 
-산출:
-  - 새 proba: pipeline/output/phase4_probas/proba_stack_isotonic_OOF.npy
-  - 모델: pipeline/output/phase4_models/stacking_isotonic_OOF.joblib
-  - 기존 in-sample 진단용 데이터는 그대로 보존 (proba_stack_calibrated.npy, stacking_isotonic.joblib)
-  - phase4_results.json 에 stacking.isotonic_OOF 섹션 추가
-  - phase4_report.md 의 §6 Stacking 섹션에 진단·비교 추가
+Outputs:
+  - New proba: pipeline/output/phase4_probas/proba_stack_isotonic_OOF.npy
+  - Model: pipeline/output/phase4_models/stacking_isotonic_OOF.joblib
+  - Existing in-sample diagnostic data preserved as-is
+    (proba_stack_calibrated.npy, stacking_isotonic.joblib)
+  - phase4_results.json: stacking.isotonic_OOF section added
+  - phase4_report.md §6 Stacking section: diagnostic comparison appended
 
-실행:
+Run:
     PYTHONUNBUFFERED=1 /opt/miniconda3/envs/mlb-xba/bin/python pipeline/step4_stacking_recalib.py \\
         2>&1 | tee pipeline/logs/step4_recalib.log
 """
@@ -58,7 +62,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # -----------------------------------------------------------------------------
-# 경로 & 결정 상수
+# Paths & decision constants
 # -----------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_DIR = ROOT / "pipeline"
@@ -117,7 +121,7 @@ def evaluate(label: str, y_true, proba, threshold: float = XGB_THRESHOLD) -> dic
 
 
 def build_stacking_template(tunes_best_params: dict) -> StackingClassifier:
-    """기존 phase4_results.json 의 best_params 로 Stacking 새로 구성 (학습 X)."""
+    """Build a fresh Stacking classifier from best_params in phase4_results.json (no training)."""
     estimators = []
     for kind, params in tunes_best_params.items():
         if kind == "rf":
@@ -145,12 +149,12 @@ def build_stacking_template(tunes_best_params: dict) -> StackingClassifier:
 
 
 # -----------------------------------------------------------------------------
-# 리포트 패치 — § 6 Stacking 섹션에 진단·OOF 결과 추가
+# Report patch — append diagnostic/OOF results to §6 Stacking section
 # -----------------------------------------------------------------------------
 def patch_report(insample_m: dict, oof_m: dict, raw_m: dict, elapsed_min: float) -> None:
     md = REPORT_PATH.read_text(encoding="utf-8")
 
-    # 추가 섹션 텍스트 (§ 6 뒤, § 7 종합 비교 앞에 삽입)
+    # Additional section text (inserted after §6, before §7 overall comparison)
     extra = []
     extra.append("### 6.2 Stacking Post-hoc Calibration — 진단 보강 (2차 실행)")
     extra.append("")
@@ -210,7 +214,7 @@ def patch_report(insample_m: dict, oof_m: dict, raw_m: dict, elapsed_min: float)
     )
     extra.append("")
 
-    # § 6 끝에 추가 — § 7 직전에 삽입
+    # Append at end of §6 — insert just before §7
     marker7 = "\n## 7. 종합 비교"
     if marker7 in md:
         idx = md.index(marker7)
@@ -219,7 +223,7 @@ def patch_report(insample_m: dict, oof_m: dict, raw_m: dict, elapsed_min: float)
         md = md.rstrip() + "\n\n" + "\n".join(extra) + "\n"
 
     REPORT_PATH.write_text(md, encoding="utf-8")
-    log(f"[report] phase4_report.md 패치 완료 (§ 6.2 추가)")
+    log(f"[report] phase4_report.md patched (§6.2 added)")
 
 
 # -----------------------------------------------------------------------------
@@ -227,12 +231,12 @@ def patch_report(insample_m: dict, oof_m: dict, raw_m: dict, elapsed_min: float)
 # -----------------------------------------------------------------------------
 def main():
     log("=" * 80)
-    log("Phase 4 Stacking Calibration 정석 재실행 (CalibratedClassifierCV cv=3)")
+    log("Phase 4 Stacking Calibration canonical re-run (CalibratedClassifierCV cv=3)")
     log("=" * 80)
     t_start = time.time()
 
-    # 1) 데이터 + 기존 결과 로드
-    log("\n[1/5] 데이터 + 기존 phase4_results.json 로드 ...")
+    # 1) Load data + existing results
+    log("\n[1/5] Loading data + existing phase4_results.json ...")
     X_train = pd.read_parquet(X_TRAIN_PARQUET)
     X_test = pd.read_parquet(X_TEST_PARQUET)
     y_train = pd.read_parquet(Y_TRAIN_PARQUET)["is_hit"]
@@ -240,16 +244,16 @@ def main():
     artifact = json.loads(RESULTS_JSON.read_text(encoding="utf-8"))
     log(f"  X_train {X_train.shape}, X_test {X_test.shape}")
 
-    # 2) Stacking template 재구성 (1차 best_params 사용)
-    log("\n[2/5] Stacking template 재구성 (1차 best_params) ...")
+    # 2) Reconstruct Stacking template (using first-run best_params)
+    log("\n[2/5] Reconstructing Stacking template (first-run best_params) ...")
     tunes_best = {k: v["best_params"] for k, v in artifact["tunes"].items()}
     for kind, p in tunes_best.items():
         log(f"  {kind.upper()} best_params: {p}")
     stack_template = build_stacking_template(tunes_best)
 
-    # 3) CalibratedClassifierCV(cv=3) 으로 정석 calibration
+    # 3) Canonical calibration via CalibratedClassifierCV(cv=3)
     log(f"\n[3/5] CalibratedClassifierCV(stack, method='{CALIBRATION_METHOD}', cv={RECALIB_CV}) ...")
-    log(f"  ⚠️ 비용: stacking 학습 × {RECALIB_CV} ≈ {22*RECALIB_CV}분 예상 (M2 Air 기준)")
+    log(f"  ⚠️ Cost: stacking training × {RECALIB_CV} ≈ {22*RECALIB_CV} min estimated (M2 Air)")
     t0 = time.time()
     cal = CalibratedClassifierCV(
         estimator=stack_template, method=CALIBRATION_METHOD,
@@ -257,41 +261,41 @@ def main():
     )
     cal.fit(X_train, y_train)
     elapsed = (time.time() - t0) / 60
-    log(f"  학습 완료 ({elapsed:.1f}분).")
+    log(f"  Training done ({elapsed:.1f} min).")
 
-    log("\n[4/5] Test 평가 + 1차 결과와 비교 ...")
+    log("\n[4/5] Test evaluation + comparison with first-run results ...")
     proba_oof = cal.predict_proba(X_test)[:, 1]
     m_oof = evaluate("stack_isotonic_OOF", y_test, proba_oof)
 
-    # 기존 결과
+    # Existing first-run results
     m_raw = artifact["stacking"]["metrics_raw"]
     m_insample = artifact["stacking"]["metrics_calibrated"]
 
-    log("\n  ▸ 1차 (in-sample isotonic) 와 비교:")
+    log("\n  ▸ Comparison with first-run (in-sample isotonic):")
     log(f"    raw                       : Brier={m_raw['brier']:.4f}  LogLoss={m_raw['log_loss']:.4f}")
     log(f"    isotonic (in-sample, 1차) : Brier={m_insample['brier']:.4f}  LogLoss={m_insample['log_loss']:.4f}  ⚠️")
     log(f"    isotonic (OOF, 2차 정석)   : Brier={m_oof['brier']:.4f}  LogLoss={m_oof['log_loss']:.4f}  ✓")
 
-    # 5) 산출물 저장 + 리포트 패치
-    log("\n[5/5] 산출물 저장 + 리포트 패치 ...")
+    # 5) Save outputs + patch report
+    log("\n[5/5] Saving outputs + patching report ...")
     np.save(PROBA_DIR / "proba_stack_isotonic_OOF.npy", proba_oof)
     joblib.dump(cal, MODELS_DIR / "stacking_isotonic_OOF.joblib")
 
-    # results.json 업데이트
-    artifact["stacking"]["metrics_calibrated_insample"] = m_insample  # 기존 1차 결과 보존
-    artifact["stacking"]["metrics_calibrated_OOF"] = m_oof             # 신규 정석 결과
+    # Update results.json
+    artifact["stacking"]["metrics_calibrated_insample"] = m_insample  # preserve first-run result
+    artifact["stacking"]["metrics_calibrated_OOF"] = m_oof             # new canonical result
     artifact["stacking"]["calibration_recalib_method"] = (
         f"CalibratedClassifierCV(stack, method='{CALIBRATION_METHOD}', cv={RECALIB_CV})"
     )
     artifact["stacking"]["calibration_recalib_seconds"] = round((time.time() - t0), 1)
     RESULTS_JSON.write_text(json.dumps(artifact, indent=2, default=str, ensure_ascii=False),
                               encoding="utf-8")
-    log(f"  → phase4_results.json 업데이트 (stacking.metrics_calibrated_OOF 추가)")
+    log(f"  → phase4_results.json updated (stacking.metrics_calibrated_OOF added)")
 
     patch_report(m_insample, m_oof, m_raw, elapsed)
 
     total = (time.time() - t_start) / 60
-    log(f"\n[done] Stacking 정석 재실행 완료 (총 {total:.1f}분).")
+    log(f"\n[done] Stacking canonical re-run complete (total {total:.1f} min).")
 
 
 if __name__ == "__main__":

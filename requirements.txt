@@ -1,29 +1,29 @@
-# ca-xBA 데이터마이닝 파이프라인 의존 패키지
-# 설치: pip install -r requirements.txt
+# Dependencies for the ca-xBA data-mining pipeline
+# Install: pip install -r requirements.txt
 
-# --- 데이터 처리 ---
+# --- Data processing ---
 numpy
 pandas
-requests              # Open-Meteo 기상 API 호출 (step1)
+requests              # Open-Meteo weather API calls (step1)
 
-# --- 머신러닝 ---
+# --- Machine learning ---
 scikit-learn
 imbalanced-learn      # SMOTE / RandomUnderSampler (imblearn)
 xgboost
 lightgbm
 joblib
 
-# --- 통계 ---
+# --- Statistics ---
 scipy
 statsmodels           # 2-way ANOVA (Phase 3)
 
-# --- 시각화 ---
+# --- Visualization ---
 matplotlib
 seaborn
 
-# --- 유틸 ---
+# --- Utilities ---
 tqdm
 
-# --- 원본 데이터 수집(선택) ---
-# Statcast 배트 트래킹 CSV를 직접 받을 때 사용. 이미 데이터가 있으면 불필요.
+# --- Raw-data collection (optional) ---
+# Used to download the Statcast bat-tracking CSV directly. Not needed if you already have the data.
 pybaseball
