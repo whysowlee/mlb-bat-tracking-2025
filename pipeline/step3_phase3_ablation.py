@@ -301,59 +301,59 @@ def write_report(
     x_advanced_n = cells["M3"]["n_features"]
 
     L: list[str] = []
-    L.append("# Phase 3 Report — 효과 분리 실험 (2×2 Factorial Ablation + 2-way ANOVA)")
+    L.append("# Phase 3 Report — Effect Separation Experiment (2×2 Factorial Ablation + 2-way ANOVA)")
     L.append("")
-    L.append(f"_생성: {now}_  ")
-    L.append("_실행 스크립트: `pipeline/step3_phase3_ablation.py`_")
+    L.append(f"_Generated: {now}_  ")
+    L.append("_Script: `pipeline/step3_phase3_ablation.py`_")
     L.append("")
     L.append(
-        "> 본 단계는 `2024_data` 만 사용하며, **Phase 2와 정확히 동일한 StratifiedKFold "
-        f"{CV_FOLDS}-fold CV (random_state={RANDOM_STATE})** 위에서 4개 cell 의 OOF "
-        "predict_proba 를 평가한다. 2025 데이터는 Phase 5 외부 검증 전용으로 본 단계에서 사용하지 않는다."
+        "> This phase uses only `2024_data` and evaluates the OOF predict_proba of 4 cells on "
+        f"**exactly the same StratifiedKFold {CV_FOLDS}-fold CV (random_state={RANDOM_STATE}) as Phase 2**. "
+        "The 2025 data is reserved exclusively for Phase 5 external validation and is not used here."
     )
     L.append("")
 
     # 1. Decisions
-    L.append("## 1. 결정 사항 (사용자 컨펌 — Phase 1 dome-masking 이후 분기 전수 재확인)")
+    L.append("## 1. Design Decisions (User-Confirmed — Full Review After Phase 1 Dome-Masking)")
     L.append("")
-    L.append("| # | 결정 항목 | 채택안 | 사유 |")
+    L.append("| # | Decision Item | Adopted Setting | Rationale |")
     L.append("|---|---|---|---|")
-    L.append("| 1 | Ablation 구조 | **2×2 Factorial Design (4 cell)** | 데이터×알고리즘 두 요인 교차 효과 + interaction 통계 검정 가능. |")
-    L.append(f"| 2 | CV 구조 | **StratifiedKFold {CV_FOLDS}-fold (Phase 2 동일 random_state={RANDOM_STATE})** | OOF predict_proba 일관성, fold별 메트릭으로 ANOVA 가능. |")
-    L.append("| 3 | Tree baseline 모델 | **XGBoost default** | Phase 2 샘플링 평가 모델과 동일 (모델 가설 중립). 하이퍼파라미터 튜닝은 Phase 4. |")
-    L.append("| 4 | 선형 baseline 모델 | LogisticRegression (C=1.0, solver=lbfgs, max_iter=2000) | 표준 GLM 기본값. |")
-    L.append(f"| 5 | 샘플링 | Phase 2 선정 = **`{meta.get('best_sampling', 'None')}`** (원본 분포 유지) | Phase 2 결정과 일관. ca-xBA 확률 calibration 우선. |")
-    L.append("| 6 | 평가 메트릭 | **Brier(주) + LogLoss + F1 + ROC AUC + Precision + Recall + Accuracy** (모두 fold-level mean±SD + OOF aggregate) | Phase 2와 동일 메트릭 풀. Brier 가 핵심. |")
-    L.append("| 7 | Interaction 검정 | **fold별 메트릭 종속 + 2-way ANOVA (Type II SS)** | statsmodels.formula.api.ols + anova_lm. 데이터·알고리즘·interaction 각 F & p-value 산출. |")
-    L.append(f"| 8 | 임계값 | 0.5 고정 | 공정 비교. 임계값 최적화는 Phase 4. |")
+    L.append("| 1 | Ablation structure | **2×2 Factorial Design (4 cells)** | Enables crossed data × algorithm two-factor effects and statistical testing of the interaction term. |")
+    L.append(f"| 2 | CV structure | **StratifiedKFold {CV_FOLDS}-fold (same random_state={RANDOM_STATE} as Phase 2)** | Consistent OOF predict_proba; per-fold metrics enable ANOVA. |")
+    L.append("| 3 | Tree baseline model | **XGBoost default** | Same as Phase 2 sampling evaluation model (model-hypothesis neutral); hyperparameter tuning deferred to Phase 4. |")
+    L.append("| 4 | Linear baseline model | LogisticRegression (C=1.0, solver=lbfgs, max_iter=2000) | Standard GLM defaults. |")
+    L.append(f"| 5 | Sampling | Phase 2 selection = **`{meta.get('best_sampling', 'None')}`** (original distribution preserved) | Consistent with Phase 2 decision; probability calibration for ca-xBA takes priority. |")
+    L.append("| 6 | Evaluation metrics | **Brier (primary) + LogLoss + F1 + ROC AUC + Precision + Recall + Accuracy** (all: fold-level mean±SD + OOF aggregate) | Same metric pool as Phase 2; Brier is the key metric. |")
+    L.append("| 7 | Interaction test | **Per-fold metric as dependent variable + 2-way ANOVA (Type II SS)** | statsmodels.formula.api.ols + anova_lm; produces F & p-value for data, algorithm, and interaction effects. |")
+    L.append(f"| 8 | Threshold | Fixed at 0.5 | Fair comparison; threshold optimization deferred to Phase 4. |")
     L.append("")
 
     # 2. Experimental design
-    L.append("## 2. 실험 설계 — 2×2 Factorial Design")
+    L.append("## 2. Experimental Design — 2×2 Factorial Design")
     L.append("")
-    L.append("**변수 셋:**")
+    L.append("**Feature sets:**")
     L.append(
-        f"- **X_base** = `{X_BASE_COLS}` (2 변수, MLB 공식 xBA 입력과 동일) — 통제군 입력\n"
-        f"- **X_advanced** = Phase 2 최종 선정 **{x_advanced_n} 변수** (X_base + 배트트래킹 + 카테고리 + 투구·상황·구장·기상 — dome-masked 적용됨)"
+        f"- **X_base** = `{X_BASE_COLS}` (2 features, identical to official MLB xBA inputs) — control input\n"
+        f"- **X_advanced** = Phase 2 final selection of **{x_advanced_n} features** (X_base + bat-tracking + categorical + pitch/situation/ballpark/weather — dome-masking applied)"
     )
     L.append("")
-    L.append("**알고리즘:**")
-    L.append("- LogReg: `LogisticRegression(C=1.0, solver='lbfgs', max_iter=2000)` (선형, 전역·단조)")
-    L.append("- XGBoost: `XGBClassifier(default, tree_method='hist')` (비선형, 국소·조건부 split)")
+    L.append("**Algorithms:**")
+    L.append("- LogReg: `LogisticRegression(C=1.0, solver='lbfgs', max_iter=2000)` (linear, global, monotonic)")
+    L.append("- XGBoost: `XGBClassifier(default, tree_method='hist')` (nonlinear, local, conditional splits)")
     L.append("")
-    L.append("**2×2 셀:**")
+    L.append("**2×2 cells:**")
     L.append("")
     L.append("|  | LogReg | XGBoost |")
     L.append("|---|---|---|")
-    L.append(f"| **X_base** ({len(X_BASE_COLS)} 변수) | M1 (통제군) | M2 (알고리즘 업그레이드) |")
-    L.append(f"| **X_advanced** ({x_advanced_n} 변수) | M3 (데이터 업그레이드) | M4 (상호작용 결합) |")
+    L.append(f"| **X_base** ({len(X_BASE_COLS)} features) | M1 (control) | M2 (algorithm upgrade) |")
+    L.append(f"| **X_advanced** ({x_advanced_n} features) | M3 (data upgrade) | M4 (combined interaction) |")
     L.append("")
-    L.append(f"**CV**: StratifiedKFold {CV_FOLDS}-fold (Phase 2 와 동일 splits, random_state={RANDOM_STATE}).")
-    L.append(f"평균 fold train size ≈ {n_train_fold_mean:,d}, val size ≈ {n_val_fold_mean:,d}.")
+    L.append(f"**CV**: StratifiedKFold {CV_FOLDS}-fold (same splits as Phase 2, random_state={RANDOM_STATE}).")
+    L.append(f"Mean fold train size ≈ {n_train_fold_mean:,d}, val size ≈ {n_val_fold_mean:,d}.")
     L.append("")
 
     # 3. Results — per-cell OOF + fold mean±SD
-    L.append("## 3. 모델별 결과 (OOF + fold mean±SD)")
+    L.append("## 3. Per-Model Results (OOF + fold mean±SD)")
     L.append("")
     L.append("### 3.1 OOF aggregate")
     L.append("")
@@ -383,16 +383,16 @@ def write_report(
         )
     L.append("")
 
-    L.append("### 3.3 2×2 셀별 OOF 메트릭 매트릭스 (Brier / AUC)")
+    L.append("### 3.3 2×2 Cell OOF Metric Matrix (Brier / AUC)")
     L.append("")
-    L.append("**Brier↓ 매트릭스:**")
+    L.append("**Brier↓ matrix:**")
     L.append("")
     L.append("|  | LogReg | XGBoost |")
     L.append("|---|---:|---:|")
     L.append(f"| X_base | {m1['brier']:.5f} (M1) | {m2['brier']:.5f} (M2) |")
     L.append(f"| X_advanced | {m3['brier']:.5f} (M3) | **{m4['brier']:.5f}** (M4) |")
     L.append("")
-    L.append("**ROC AUC 매트릭스:**")
+    L.append("**ROC AUC matrix:**")
     L.append("")
     L.append("|  | LogReg | XGBoost |")
     L.append("|---|---:|---:|")
@@ -403,16 +403,16 @@ def write_report(
     # 4. Effect Decomposition
     L.append("## 4. Effect Decomposition (2×2 Factorial)")
     L.append("")
-    L.append("**핵심 메트릭 (Brier↓ / LogLoss↓ / F1 / ROC AUC):**")
+    L.append("**Key metrics (Brier↓ / LogLoss↓ / F1 / ROC AUC):**")
     L.append("")
     L.append("| Effect | ΔBrier | ΔLogLoss | ΔF1 | ΔAUC |")
     L.append("|---|---:|---:|---:|---:|")
     eff_names = [
-        ("데이터 효과 (in LogReg)  : M3−M1", "data_in_logreg"),
-        ("데이터 효과 (in XGBoost) : M4−M2", "data_in_xgb"),
-        ("알고리즘 효과 (in X_base) : M2−M1", "algo_in_xbase"),
-        ("알고리즘 효과 (in X_adv)  : M4−M3", "algo_in_xadvanced"),
-        ("결합 효과               : M4−M1", "combined_M4_M1"),
+        ("Data effect (in LogReg)  : M3−M1", "data_in_logreg"),
+        ("Data effect (in XGBoost) : M4−M2", "data_in_xgb"),
+        ("Algorithm effect (in X_base) : M2−M1", "algo_in_xbase"),
+        ("Algorithm effect (in X_adv)  : M4−M3", "algo_in_xadvanced"),
+        ("Combined effect               : M4−M1", "combined_M4_M1"),
         ("**Interaction** : (M4−M2)−(M3−M1)", "interaction"),
     ]
     for label, key in eff_names:
@@ -425,8 +425,9 @@ def write_report(
         )
     L.append("")
     L.append(
-        "_해석 가이드: **Brier·LogLoss 는 음수(감소)가 좋음**, F1·AUC 는 양수(증가)가 좋음. "
-        "Interaction 행이 0보다 유의하게 다를수록 비선형 상호작용이 명확하다._"
+        "_Interpretation guide: **negative (decrease) is better for Brier and LogLoss**; "
+        "positive (increase) is better for F1 and AUC. "
+        "The more the Interaction row deviates significantly from 0, the clearer the nonlinear interaction._"
     )
     L.append("")
 
@@ -434,8 +435,8 @@ def write_report(
     L.append("## 5. 2-way ANOVA (fold-level)")
     L.append("")
     L.append(
-        f"각 fold(n={CV_FOLDS}) 의 메트릭을 종속변수로, "
-        f"**Data(X_base/X_advanced) × Algo(LogReg/XGB)** 를 요인으로 한 Type II SS ANOVA."
+        f"Type II SS ANOVA using per-fold metrics (n={CV_FOLDS} folds) as the dependent variable "
+        f"and **Data(X_base/X_advanced) × Algo(LogReg/XGB)** as factors."
     )
     L.append("")
     for metric in ["brier", "logloss", "roc_auc", "f1"]:
@@ -457,75 +458,79 @@ def write_report(
         L.append("")
 
     # 6. Interpretation
-    L.append("## 6. 해석")
+    L.append("## 6. Interpretation")
     L.append("")
-    L.append("### 6.1 표면적 관찰")
+    L.append("### 6.1 Surface-Level Observations")
     L.append("")
     L.append(
-        f"- **M1 (X_base + LogReg)**: 가장 단순한 모델, Brier={m1['brier']:.5f}. "
-        f"launch_speed/angle 두 변수 + 선형 결합 = 정통 xBA 의 본질적 한계 측정.\n"
-        f"- **M2 (X_base + XGB)**: 같은 2 변수에 비선형 알고리즘만 변경 → Brier={m2['brier']:.5f} "
+        f"- **M1 (X_base + LogReg)**: The simplest model, Brier={m1['brier']:.5f}. "
+        f"Two features (launch_speed/angle) with a linear combination — measures the intrinsic ceiling of canonical xBA.\n"
+        f"- **M2 (X_base + XGB)**: Same 2 features, only the algorithm changed to nonlinear → Brier={m2['brier']:.5f} "
         f"(ΔBrier vs M1 = {deltas['brier']['algo_in_xbase']:+.5f}).\n"
-        f"- **M3 (X_advanced + LogReg)**: {x_advanced_n} 변수로 풍부해졌지만 여전히 선형 → "
+        f"- **M3 (X_advanced + LogReg)**: Enriched to {x_advanced_n} features but still linear → "
         f"Brier={m3['brier']:.5f} (ΔBrier vs M1 = {deltas['brier']['data_in_logreg']:+.5f}).\n"
-        f"- **M4 (X_advanced + XGB)**: 풍부한 변수 + 비선형 결합 → Brier={m4['brier']:.5f} "
+        f"- **M4 (X_advanced + XGB)**: Rich features + nonlinear combination → Brier={m4['brier']:.5f} "
         f"(ΔBrier vs M3 = {deltas['brier']['algo_in_xadvanced']:+.5f}, vs M2 = {deltas['brier']['data_in_xgb']:+.5f})."
     )
     L.append("")
-    L.append("### 6.2 Effect 비교 — 환경 변수의 가치는 비선형 모델 위에서만 발현")
+    L.append("### 6.2 Effect Comparison — Environmental Features Manifest Only Under a Nonlinear Model")
     L.append("")
     L.append(
-        f"- 데이터 효과 (LogReg 위): ΔBrier = **{deltas['brier']['data_in_logreg']:+.5f}** "
-        f"→ 선형 모델은 환경 변수 60개를 추가해도 거의 개선 없음 (선형·전역·단조 가정의 한계).\n"
-        f"- 데이터 효과 (XGB 위): ΔBrier = **{deltas['brier']['data_in_xgb']:+.5f}** "
-        f"→ 같은 환경 변수가 트리 위에서는 명확히 개선 (국소·조건부 split 으로 비선형 결합 학습).\n"
-        f"- 이 두 값의 차이 = **Interaction = (M4−M2)−(M3−M1) = "
-        f"{deltas['brier']['interaction']:+.5f}** (Brier ↓ 방향)."
+        f"- Data effect (on LogReg): ΔBrier = **{deltas['brier']['data_in_logreg']:+.5f}** "
+        f"→ Adding ~60 environmental features to a linear model yields almost no improvement (limitation of linear/global/monotonic assumptions).\n"
+        f"- Data effect (on XGB): ΔBrier = **{deltas['brier']['data_in_xgb']:+.5f}** "
+        f"→ The same environmental features produce clear improvement on a tree (nonlinear combinations learned via local/conditional splits).\n"
+        f"- The difference between these two values = **Interaction = (M4−M2)−(M3−M1) = "
+        f"{deltas['brier']['interaction']:+.5f}** (Brier ↓ direction)."
     )
     L.append("")
-    L.append("### 6.3 ANOVA 통계적 결론")
+    L.append("### 6.3 ANOVA Statistical Conclusions")
     L.append("")
     interaction_p_brier = anova["brier"].get("C(data):C(algo)", {}).get("p")
     if interaction_p_brier is not None:
-        sig_str = "**유의함 (p < 0.05)**" if interaction_p_brier < 0.05 else "유의하지 않음 (p ≥ 0.05)"
+        sig_str = "**significant (p < 0.05)**" if interaction_p_brier < 0.05 else "not significant (p ≥ 0.05)"
         L.append(
-            f"- Brier 에 대한 2-way ANOVA 의 **interaction term (`C(data):C(algo)`) p-value = "
+            f"- 2-way ANOVA on Brier: **interaction term (`C(data):C(algo)`) p-value = "
             f"{interaction_p_brier:.4g}** → {sig_str}."
         )
     L.append(
-        "- 이는 \"데이터 변수 풀의 효과 크기가 알고리즘에 의존한다\" — 즉 비선형 상호작용이 "
-        "통계적으로 존재한다는 직접 증거."
+        "- This constitutes direct evidence that \"the magnitude of the data feature-pool effect depends on the algorithm\" — "
+        "i.e., a nonlinear interaction exists statistically."
     )
     L.append(
-        "- LogReg 의 한계: feature 가 logit 에 대해 *독립·선형* 으로 기여한다고 가정. "
-        "환경 60종 추가해도 \"기온 1°C 상승 → 안타 logit β 증가\" 같은 *전역·단조* 변동만 학습 → 평균적으로 상쇄."
+        "- Limitation of LogReg: assumes each feature contributes *independently and linearly* to the logit. "
+        "Adding ~60 environmental features still learns only *global, monotonic* variations such as "
+        "\"temperature +1°C → logit β increase for hit\" → effects cancel on average."
     )
     L.append(
-        "- XGBoost 의 발현: split 으로 *부분 영역마다 다른 결정 경로* 학습. "
-        "예) `if launch_angle ∈ [25°, 35°] AND launch_speed > 100 AND elevation > 4000ft → 안타 확률 ↑` 같은 "
-        "*교호작용 규칙* 자동 발굴."
+        "- XGBoost expression: learns *different decision paths for different sub-regions* via splits. "
+        "For example, interaction rules such as "
+        "`if launch_angle ∈ [25°, 35°] AND launch_speed > 100 AND elevation > 4000ft → hit probability ↑` "
+        "are discovered automatically."
     )
     L.append("")
-    L.append("### 6.4 결론 — Phase 4 트리 앙상블 + Stacking 채택의 학술적 근거")
+    L.append("### 6.4 Conclusion — Academic Justification for Adopting Tree Ensemble + Stacking in Phase 4")
     L.append("")
     L.append(
-        "Phase 3 의 2×2 ablation 은 *환경 변수 자체가 무의미하다* 는 뜻이 아니라, "
-        "**\"환경 변수의 가치는 비선형 상호작용을 학습할 수 있는 모델 위에서만 발현된다\"** 는 사실을 "
-        "interaction term 으로 직접 입증한다. 같은 환경 변수가 LogReg 위에서는 ΔBrier "
-        f"≈ {deltas['brier']['data_in_logreg']:+.5f}, XGBoost 위에서는 ΔBrier ≈ "
-        f"{deltas['brier']['data_in_xgb']:+.5f} — 동일 데이터, 동일 샘플링, 동일 임계값 조건에서 "
-        "*모델만 바꿔도* 환경 변수의 효과가 전혀 다르게 발현된다는 것은 비선형 상호작용 외에 다른 설명이 없다. "
-        "Phase 4 트리 앙상블 + Stacking Meta Model 아키텍처의 학술적 정당성이 이로써 완성된다."
+        "The Phase 3 2×2 ablation does not imply that environmental features are meaningless in themselves. "
+        "Rather, it directly demonstrates via the interaction term that "
+        "**\"the value of environmental features manifests only on a model capable of learning nonlinear interactions.\"** "
+        "The same environmental features yield ΔBrier "
+        f"≈ {deltas['brier']['data_in_logreg']:+.5f} on LogReg versus ΔBrier ≈ "
+        f"{deltas['brier']['data_in_xgb']:+.5f} on XGBoost — under identical data, identical sampling, and identical threshold. "
+        "The fact that *changing only the model* produces such starkly different effects from the same features "
+        "has no explanation other than nonlinear interaction. "
+        "The academic justification for the Phase 4 tree ensemble + Stacking Meta Model architecture is thereby established."
     )
     L.append("")
 
     # 7. Artifacts
-    L.append("## 7. 산출물")
+    L.append("## 7. Artifacts")
     L.append("")
     L.append(
-        f"- `{REPORT_PATH.relative_to(ROOT)}` — 본 리포트\n"
-        f"- `{RESULTS_JSON.relative_to(ROOT)}` — 4 cell × 5 fold 메트릭, deltas, ANOVA 결과, OOF proba\n"
-        f"- `pipeline/logs/step3_phase3.log` — 실행 로그"
+        f"- `{REPORT_PATH.relative_to(ROOT)}` — this report\n"
+        f"- `{RESULTS_JSON.relative_to(ROOT)}` — 4 cell × 5 fold metrics, deltas, ANOVA results, OOF proba\n"
+        f"- `pipeline/logs/step3_phase3.log` — execution log"
     )
     L.append("")
 

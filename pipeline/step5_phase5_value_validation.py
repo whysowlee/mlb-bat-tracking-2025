@@ -761,169 +761,177 @@ def write_report(
     model_meta = model_meta or {}
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     L: list[str] = []
-    L.append("# Phase 5 Report — 최종 지표(ca-xBA) 산출 및 세이버메트릭스 가치 검증")
+    L.append("# Phase 5 Report — Final Metric (ca-xBA) Computation and Sabermetric Value Validation")
     L.append("")
-    L.append(f"_생성: {now}_  ")
-    L.append("_실행 스크립트: `pipeline/step5_phase5_value_validation.py`_")
+    L.append(f"_Generated: {now}_  ")
+    L.append("_Script: `pipeline/step5_phase5_value_validation.py`_")
     L.append("")
     L.append(
-        "> **📝 Note — 용어 통일:** 본 리포트는 Baseball Savant 데이터 소스와의 일관성을 위해 "
-        "학술 용어 'wOBAcon' 대신 사반트 표준 컬럼명 **'wOBA'** 를 사용한다. 단, 사반트 리더보드 "
-        "특성상 삼진/볼넷이 걸러진 이 데이터셋의 `wOBA` 는 세이버메트릭스 학술 용어인 wOBAcon 과 "
-        "**수학적으로 완전히 동일하다**(BIP 한정 가중 출루율)."
+        "> **📝 Note — Terminology:** This report uses the Baseball Savant standard column name **'wOBA'** "
+        "instead of the academic term 'wOBAcon' for consistency with the data source. However, due to the "
+        "nature of the Savant leaderboard, the `wOBA` in this dataset — from which strikeouts and walks "
+        "have been filtered out — is **mathematically identical** to the sabermetric academic term wOBAcon "
+        "(BIP-restricted weighted on-base average)."
     )
     L.append("")
     L.append(
-        "> **목적:** Phase 4 의 최종 모델 **LGBM + Isotonic (cv='prefit' 패턴, "
-        f"OOF Brier = {phase4_final_oof_brier:.5f}; 오캄의 면도날 자동 선정)** 을 격리된 2025 "
-        "데이터에 적용해 타구별 ca-xBA 를 산출하고, 선수별 평균 ca-xBA 가 실제 `wOBA` 와 "
-        "강한 상관관계를 가지는지 검증한다. readme Phase 5 이론적 배경: "
-        "well-calibrated probability 평균 → wOBA 강한 양의 상관."
+        "> **Objective:** Apply Phase 4's final model **LGBM + Isotonic (cv='prefit' pattern, "
+        f"OOF Brier = {phase4_final_oof_brier:.5f}; selected by Occam's razor)** to held-out 2025 "
+        "data to compute per-pitch ca-xBA, then validate whether the per-player average ca-xBA exhibits "
+        "a strong correlation with the actual `wOBA`. Theoretical background from readme Phase 5: "
+        "well-calibrated probability average → strong positive correlation with wOBA."
     )
     L.append("")
     if model_meta:
         L.append(
-            f"> **모델 메타:** `{model_meta.get('path', '')}` · type=`{model_meta.get('type', '')}` "
+            f"> **Model meta:** `{model_meta.get('path', '')}` · type=`{model_meta.get('type', '')}` "
             f"· pipeline=`{model_meta.get('pipeline', '')}`"
         )
         L.append("")
 
-    L.append("## 1. 결정 사항 (사용자 컨펌, 10건)")
+    L.append("## 1. Key Decisions (User-Confirmed, 10 Items)")
     L.append("")
-    L.append("| # | 결정 | 채택안 | 도메인 맥락 |")
+    L.append("| # | Decision | Adopted Approach | Domain Context |")
     L.append("|---|---|---|---|")
     L.append(
-        f"| 1 | 메인 엔진 | **LGBM + Isotonic** (Phase 4 OOF Brier = {phase4_final_oof_brier:.5f}) | "
-        "오캄의 면도날 자동 선정 — Stacking + Isotonic(0.13083)과 통계적 동률(ΔBrier 0.00009 ≤ ε 0.001) "
-        "이므로 단순한 모델 채택. 단순 분류가 아닌 정확한 확률 산출. |"
+        f"| 1 | Main engine | **LGBM + Isotonic** (Phase 4 OOF Brier = {phase4_final_oof_brier:.5f}) | "
+        "Selected by Occam's razor — statistical tie with Stacking + Isotonic (0.13083) "
+        "(ΔBrier 0.00009 ≤ ε 0.001), so the simpler model is adopted. Goal is accurate probability estimation, not simple classification. |"
     )
-    L.append("| 2 | 집계 방식 | **BIP 단순 평균** (PA 가중 금지) | ca-xBA = 타구 본연의 퀄리티 지표 |")
-    L.append(f"| 3 | 최소 PA | **{MIN_PA} 이상** (expected_stats.csv 자체 적용) | 1군 레귤러 타자 기준 |")
-    L.append("| 4 | ID 매칭 | **MLBAM 직접 조인** (fuzzy 금지) | 동명이인 대참사 방지 |")
-    L.append("| 5 | 포지션 정의 | **시즌 최다 출장 포지션** (MLB Stats API) | 실버 슬러거와 기준 통일 |")
-    L.append("| 6 | 실버 슬러거 명단 | **정적 CSV** (`데이터셋/silver_slugger_2025.csv`) | Ground truth 고정 |")
-    L.append("| 7 | 운 분석 | **`AVG − ca-xBA` 단순 차이값** | 야구 도메인 *할/푼/리* 직관 |")
-    L.append(f"| 8 | BIP 정의 일치 | **assert** (`our_bip / csv.bip ≥ {BIP_TOLERANCE_FRACTION:.0%}`) | 분모 오류 R² 오염 방지 (ATH 제외·컷오프 영향 흡수) |")
-    L.append("| 9 | 포지션 정밀 검증 | **statsapi.mlb.com 직접 호출** + 캐시 | 309명 × 5분, 외부 의존성 최소 |")
-    L.append("| 10 | 1:1 R² 대조 (xwOBA 제외) | **ca-xBA vs wOBA / xBA vs wOBA** 두 독립변수만 비교 | xwOBA 는 wOBA 자체 예측 지표(동어반복) → 체급 불일치로 제외 (readme 2026-05-29) |")
+    L.append("| 2 | Aggregation | **Simple BIP mean** (PA weighting prohibited) | ca-xBA = pure contact-quality metric |")
+    L.append(f"| 3 | Minimum PA | **{MIN_PA}+** (pre-applied within expected_stats.csv) | Covers genuine MLB regulars |")
+    L.append("| 4 | ID matching | **Direct MLBAM join** (fuzzy matching prohibited) | Prevents name-collision disasters |")
+    L.append("| 5 | Position definition | **Most-played position in season** (MLB Stats API) | Aligns with Silver Slugger criteria |")
+    L.append("| 6 | Silver Slugger roster | **Static CSV** (`데이터셋/silver_slugger_2025.csv`) | Ground truth fixed |")
+    L.append("| 7 | Luck analysis | **Simple difference `AVG − ca-xBA`** | Intuitive in the baseball domain |")
+    L.append(f"| 8 | BIP definition consistency | **assert** (`our_bip / csv.bip ≥ {BIP_TOLERANCE_FRACTION:.0%}`) | Prevents denominator-error R² contamination (absorbs ATH exclusion and cutoff effects) |")
+    L.append("| 9 | Position precision check | **Direct call to statsapi.mlb.com** + cache | 309 players × ~5 min, minimal external dependency |")
+    L.append("| 10 | 1:1 R² comparison (xwOBA excluded) | Only two independent variables: **ca-xBA vs wOBA / xBA vs wOBA** | xwOBA is a tautological self-predictor of wOBA → excluded due to scope mismatch (readme 2026-05-29) |")
     L.append("")
 
-    L.append("## 2. 데이터 매칭 + BIP 정의 일치 검증")
+    L.append("## 2. Data Matching + BIP Definition Consistency Validation")
     L.append("")
-    L.append(f"- expected_stats.csv 선수 수: **{qc['n_expected_stats']:,d}** (250 PA 사전 적용)")
-    L.append(f"- 매칭 성공: **{qc['n_matched']}/{qc['n_expected_stats']}** ({qc['n_matched']/qc['n_expected_stats']*100:.1f}%)")
-    L.append(f"- 누락: {qc['n_missing']} (2025 우리 데이터에 BIP 없음 — 250 PA 달성했지만 ATH 소속 등)")
+    L.append(f"- Players in expected_stats.csv: **{qc['n_expected_stats']:,d}** (250 PA pre-applied)")
+    L.append(f"- Match success: **{qc['n_matched']}/{qc['n_expected_stats']}** ({qc['n_matched']/qc['n_expected_stats']*100:.1f}%)")
+    L.append(f"- Missing: {qc['n_missing']} (no BIP in our 2025 data — achieved 250 PA but on ATH roster, etc.)")
     L.append("")
-    L.append("### BIP 정의 일치 분석")
-    L.append(f"- `our_bip / csv.bip` 비율 — mean={qc['bip_ratio_mean']:.4f}, median={qc['bip_ratio_median']:.4f}")
-    L.append(f"- tolerance ({qc['tolerance_fraction']:.0%}) 미달: **{qc['n_below_tolerance']}** 명 (대부분 ATH 소속, 홈경기 제외 영향)")
-    L.append("- 우리 BIP < csv.bip 가 일반적 (Phase 1 의 ATH 홈 제외 + |la|>60 컷오프 + 핵심 결측 제거 영향)")
+    L.append("### BIP Definition Consistency Analysis")
+    L.append(f"- `our_bip / csv.bip` ratio — mean={qc['bip_ratio_mean']:.4f}, median={qc['bip_ratio_median']:.4f}")
+    L.append(f"- Below tolerance ({qc['tolerance_fraction']:.0%}): **{qc['n_below_tolerance']}** players (mostly ATH roster members, affected by home-game exclusion)")
+    L.append("- our BIP < csv.bip is generally expected (Phase 1 ATH home-game exclusion + |la|>60 cutoff + key missing-value removal)")
     L.append("")
 
-    L.append(f"## 3. 메인 검증 — 1:1 R² 대조 (대상 선수 {n_players}명, 250+ PA)")
+    L.append(f"## 3. Main Validation — 1:1 R² Comparison ({n_players} players, 250+ PA)")
     L.append("")
-    L.append("**Y축 기준점 (실제 기량) = 실제 `wOBA` (BIP-only weighted OBP). 두 독립변수와의 1:1 R² 비교:**")
+    L.append("**Y-axis reference (true offensive production) = actual `wOBA` (BIP-only weighted OBP). 1:1 R² comparison with two independent variables:**")
     L.append("")
-    L.append("| 독립변수 | Pearson r | **R²** | Spearman ρ |")
+    L.append("| Independent Variable | Pearson r | **R²** | Spearman ρ |")
     L.append("|---|---:|---:|---:|")
     for _, m in correlations.items():
         L.append(f"| **{m['label']}** | {m['pearson_r']:.4f} | **{m['r_squared']:.4f}** | {m['spearman_rho']:.4f} |")
     L.append("")
     ca_xba_r2 = correlations.get("ca_xba", {}).get("r_squared", float("nan"))
     est_ba_r2 = correlations.get("est_ba", {}).get("r_squared", float("nan"))
-    L.append(f"- **우리 ca-xBA R² = {ca_xba_r2:.4f}**")
-    L.append(f"- MLB 공식 xBA (est_ba) R² = {est_ba_r2:.4f}")
+    L.append(f"- **Our ca-xBA R² = {ca_xba_r2:.4f}**")
+    L.append(f"- MLB official xBA (est_ba) R² = {est_ba_r2:.4f}")
     L.append("")
     if ca_xba_r2 > est_ba_r2:
         relative_gain = (ca_xba_r2 - est_ba_r2) / est_ba_r2 * 100
-        L.append(f"→ **ca-xBA 가 MLB 공식 xBA 보다 절대 R² 차이 {(ca_xba_r2 - est_ba_r2):+.4f} "
-                 f"(상대 우위 +{relative_gain:.1f}%) 우수** — 실제 `wOBA` 설명력에서 명확한 개선.")
+        L.append(f"→ **ca-xBA outperforms MLB official xBA by an absolute R² difference of {(ca_xba_r2 - est_ba_r2):+.4f} "
+                 f"(relative advantage +{relative_gain:.1f}%)** — a clear improvement in explanatory power for actual `wOBA`.")
     L.append("")
-    L.append("> **⚠️ 비교 구도 명세:** xwOBA(est_woba)는 wOBA 를 직접 예측하는 Statcast 지표라 "
-             "동어반복적·체급 불일치 → 1:1 R² 비교에서 의도적으로 제외 (readme Phase 5 검증 구도, 2026-05-29).")
+    L.append("> **⚠️ Comparison scope note:** xwOBA (est_woba) is a Statcast metric that directly predicts wOBA — "
+             "it is tautological and mismatched in scope → intentionally excluded from the 1:1 R² comparison "
+             "(readme Phase 5 validation setup, 2026-05-29).")
     L.append("")
 
-    L.append(f"## 4. 운(Luck) 분석 — `luck = BIP-AVG − ca-xBA` (분모 통일) + 통산 BABIP 교차 검증")
+    L.append(f"## 4. Luck Analysis — `luck = BIP-AVG − ca-xBA` (Unified Denominator) + Career BABIP Cross-Validation")
     L.append("")
-    L.append("### 4.1 luck 정의 및 분모 통일의 학술적 의의")
+    L.append("### 4.1 Luck Definition and Academic Significance of Denominator Unification")
     L.append("")
     babip_stats = luck.get("babip_stats", {})
     league_babip = babip_stats.get("league_babip", float("nan"))
     L.append(
-        "본 분석의 운(Luck) 지표는 `luck = BIP-AVG − ca-xBA` 로 정의된다. "
-        "`BIP-AVG = (안타 수) / (인플레이 타구 수)` 는 ca-xBA 의 분모(BIP)와 정확히 일치하는 "
-        "비교 baseline 이다. 이는 단순 타율(AVG, 분모 = AB)이 삼진을 분모에 포함하여 발생하는 "
-        "체계적 음수 시프트와 삼진율 오염을 제거하고, 순수 contact quality 대비 실제 안타 결과의 "
-        "괴리를 측정하는 학술 정통 지표이다."
+        "The luck metric in this analysis is defined as `luck = BIP-AVG − ca-xBA`. "
+        "`BIP-AVG = (hits) / (balls in play)` uses exactly the same denominator (BIP) as ca-xBA, "
+        "making it the academically orthodox comparison baseline. This removes the systematic negative "
+        "shift and strikeout-rate contamination that arise when simple AVG (denominator = AB) includes "
+        "strikeouts in the denominator, yielding a pure measure of the gap between contact quality and "
+        "actual hit outcomes."
     )
     L.append("")
     L.append(
-        f"- `luck` 분포: mean={luck['luck_stats']['mean']:+.4f}, std={luck['luck_stats']['std']:.4f}, "
+        f"- `luck` distribution: mean={luck['luck_stats']['mean']:+.4f}, std={luck['luck_stats']['std']:.4f}, "
         f"min={luck['luck_stats']['min']:+.4f}, max={luck['luck_stats']['max']:+.4f}"
     )
     L.append("")
     L.append(
-        "분모 통일로 인해 luck 분포는 0 근처에 대칭적으로 정렬되며, 절대값 자체가 해석 가능하다. "
-        "양수는 \"이 정도 contact quality 였으면 더 적은 안타가 나왔어야 하는데 실제로는 더 많이 "
-        "나왔다(행운 효과 가설)\" 를, 음수는 \"이 정도 quality 였으면 더 많은 안타가 나왔어야 "
-        "하는데 호수비·구장 환경 등으로 손해를 봤다(불운 가설)\" 를 의미한다."
+        "With unified denominators, the luck distribution is symmetrically centered near 0 and the "
+        "absolute value is directly interpretable. "
+        "Positive values mean \"given this level of contact quality, fewer hits should have occurred, "
+        "yet more were recorded (lucky effect hypothesis)\"; negative values mean \"given this level of "
+        "quality, more hits should have occurred, but stellar defense or park environment caused a "
+        "penalty (unlucky hypothesis)\"."
     )
     L.append("")
 
-    L.append("### 4.2 BABIP 교차 검증 — 도메인 정통: 시즌 BABIP vs 자기 통산 BABIP")
+    L.append("### 4.2 BABIP Cross-Validation — Domain Orthodox: Seasonal BABIP vs Career BABIP")
     L.append("")
     n_with_career = babip_stats.get("n_with_career", 0)
     L.append(
-        f"- **시즌 BABIP** (분석군 평균): {babip_stats.get('season_babip_mean', float('nan')):.4f} "
+        f"- **Seasonal BABIP** (analysis group mean): {babip_stats.get('season_babip_mean', float('nan')):.4f} "
         f"(SD {babip_stats.get('season_babip_std', float('nan')):.4f})"
     )
     L.append(
-        f"- **통산 BABIP** (MLB Stats API career hitting stats, n={n_with_career}/{n_players}): "
-        f"평균 {babip_stats.get('career_babip_mean', float('nan')):.4f} "
+        f"- **Career BABIP** (MLB Stats API career hitting stats, n={n_with_career}/{n_players}): "
+        f"mean {babip_stats.get('career_babip_mean', float('nan')):.4f} "
         f"(SD {babip_stats.get('career_babip_std', float('nan')):.4f})"
     )
     L.append(
-        f"- **시즌 − 통산 편차 (Δ_BABIP)**: 평균 {babip_stats.get('season_minus_career_mean', float('nan')):+.4f}, "
+        f"- **Seasonal − Career deviation (Δ_BABIP)**: mean {babip_stats.get('season_minus_career_mean', float('nan')):+.4f}, "
         f"SD {babip_stats.get('season_minus_career_std', float('nan')):.4f} — "
-        "**도메인 정통 \"운/행운에 의한 효과\" 시그널**"
+        "**domain-orthodox signal for lucky/fortunate effect**"
     )
     L.append(
-        f"- (보조) 분석군 리그 평균 BABIP (BIP-가중): {league_babip:.4f}"
+        f"- (Supplementary) Analysis-group league-average BABIP (BIP-weighted): {league_babip:.4f}"
     )
     L.append("")
     L.append(
-        "> **방법론적 주의**: BABIP 자체가 단순히 리그 평균보다 높다고 곧 \"행운\"이라 단정하는 것은 "
-        "도메인적으로 부정확하다. 진정한 운/불운 진단은 선수의 **통산 BABIP (개인 baseline)** 대비 "
-        "시즌 편차로 본다. 예: Mike Trout 의 통산 BABIP ≈ .342 이므로 2025 시즌 BABIP .342 는 "
-        "**평균 수준이지 행운 효과가 아니다**. 반면 통산 BABIP .260 인 선수의 시즌 .320 은 "
-        "Δ_BABIP = +0.060 으로 **명백한 행운 효과 시그널**이다."
+        "> **Methodological caution**: It is domain-inaccurate to conclude \"lucky\" simply because a "
+        "player's BABIP exceeds the league average. True luck/unluck diagnosis is measured as the "
+        "seasonal deviation from the player's own **career BABIP (personal baseline)**. "
+        "Example: Mike Trout's career BABIP ≈ .342, so a 2025 seasonal BABIP of .342 is "
+        "**average — not a lucky effect**. By contrast, a .320 seasonal BABIP for a player with a "
+        "career BABIP of .260 represents a Δ_BABIP = +0.060 — an **unambiguous lucky-effect signal**."
     )
     L.append("")
 
-    L.append("### 4.3 두 운 지표 상관 — luck vs (시즌 BABIP) / vs Δ_BABIP")
+    L.append("### 4.3 Correlation of Two Luck Metrics — luck vs (Seasonal BABIP) / vs Δ_BABIP")
     L.append("")
     pearson_lb = babip_stats.get("luck_babip_pearson", float("nan"))
     spearman_lb = babip_stats.get("luck_babip_spearman", float("nan"))
     pearson_d = babip_stats.get("luck_delta_pearson", float("nan"))
     spearman_d = babip_stats.get("luck_delta_spearman", float("nan"))
-    L.append("| 비교 대상 | Pearson r | Spearman ρ | 도메인적 위상 |")
+    L.append("| Comparison | Pearson r | Spearman ρ | Domain Status |")
     L.append("|---|---:|---:|---|")
-    L.append(f"| luck vs 시즌 BABIP | {pearson_lb:.4f} | {spearman_lb:.4f} | 단일 시즌 평균 비교 — 한계 있음 |")
-    L.append(f"| **luck vs Δ_BABIP (시즌 − 통산)** | **{pearson_d:.4f}** | **{spearman_d:.4f}** | **도메인 정통 비교 — 개인 baseline 보정** |")
+    L.append(f"| luck vs seasonal BABIP | {pearson_lb:.4f} | {spearman_lb:.4f} | Single-season average comparison — limited |")
+    L.append(f"| **luck vs Δ_BABIP (seasonal − career)** | **{pearson_d:.4f}** | **{spearman_d:.4f}** | **Domain-orthodox comparison — personal baseline adjusted** |")
     L.append("")
     L.append(
-        "두 지표 모두 양의 상관을 보이지만, 도메인 정통 해석인 **Δ_BABIP 와의 상관이 더 의미 있다**. "
-        f"본 분석에서 luck vs Δ_BABIP 의 Pearson r = {pearson_d:.3f} 는 \"ca-xBA 기반 luck 지표가 "
-        "야구 도메인의 정통 행운 시그널(통산 BABIP 대비 편차)과 동일한 방향을 가리킨다\"는 객관적 검증이다. "
-        "단, 상관계수가 1.0 에 가깝지 않은 이유는 ca-xBA 가 BABIP 가 잡지 못하는 "
-        "**dome × weather 상호작용, hr_park_effects, 구장 펜스 거리** 등 환경 보정 신호를 추가로 "
-        "포착하기 때문이다 (Trout·Schwarber 패턴, §4.6)."
+        "Both metrics show a positive correlation, but the **correlation with Δ_BABIP is more meaningful** "
+        "under the domain-orthodox interpretation. "
+        f"In this analysis, Pearson r = {pearson_d:.3f} for luck vs Δ_BABIP provides objective validation "
+        "that \"the ca-xBA-based luck metric points in the same direction as the orthodox baseball luck signal "
+        "(deviation from career BABIP)\". "
+        "The reason the correlation does not approach 1.0 is that ca-xBA additionally captures "
+        "**dome × weather interactions, hr_park_effects, and outfield fence distances** — "
+        "environment-correction signals that BABIP cannot detect (Trout–Schwarber pattern, §4.6)."
     )
     L.append("")
 
-    L.append(f"### 4.4 운(행운 효과 가설) Top {N_LUCK_TOPN}")
+    L.append(f"### 4.4 Lucky (Fortunate Effect Hypothesis) Top {N_LUCK_TOPN}")
     L.append("")
-    L.append("| 선수 | PA | AVG | BIP-AVG | ca-xBA | luck | 시즌 BABIP | 통산 BABIP | Δ_BABIP |")
+    L.append("| Player | PA | AVG | BIP-AVG | ca-xBA | luck | Seasonal BABIP | Career BABIP | Δ_BABIP |")
     L.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in luck["top_lucky"]:
         cb = r.get("career_babip", float("nan"))
@@ -939,16 +947,17 @@ def write_report(
         )
     L.append("")
     L.append(
-        "해석 가이드: luck (= BIP-AVG − ca-xBA) 가 양수면 contact quality 대비 더 많은 안타가 "
-        "나왔다는 의미다. 함께 Δ_BABIP > 0 (자기 통산 대비 시즌 BABIP 높음) 이면 두 지표가 모두 "
-        "행운 효과로 일치하는 이중 검증이고, Δ_BABIP ≈ 0 또는 음수면 luck 가 잡은 행운이 BABIP "
-        "단일 지표로는 확인되지 않는 ca-xBA 환경 보정 시그널을 의미한다."
+        "Interpretation guide: a positive luck (= BIP-AVG − ca-xBA) means more hits occurred than "
+        "the contact quality would predict. When combined with Δ_BABIP > 0 (seasonal BABIP above own "
+        "career baseline), both metrics agree on a lucky effect — dual validation. When Δ_BABIP ≈ 0 "
+        "or negative, the luck signal reflects a ca-xBA environment-correction signal that BABIP alone "
+        "cannot detect."
     )
     L.append("")
 
-    L.append(f"### 4.5 불운(호수비·환경 손해 가설) Top {N_LUCK_TOPN}")
+    L.append(f"### 4.5 Unlucky (Stellar Defense / Park Environment Penalty Hypothesis) Top {N_LUCK_TOPN}")
     L.append("")
-    L.append("| 선수 | PA | AVG | BIP-AVG | ca-xBA | luck | 시즌 BABIP | 통산 BABIP | Δ_BABIP |")
+    L.append("| Player | PA | AVG | BIP-AVG | ca-xBA | luck | Seasonal BABIP | Career BABIP | Δ_BABIP |")
     L.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in luck["top_unlucky"]:
         cb = r.get("career_babip", float("nan"))
@@ -964,64 +973,73 @@ def write_report(
         )
     L.append("")
     L.append(
-        "해석 가이드: luck 가 음수면 contact quality 대비 안타가 적게 나왔다는 의미다. "
-        "Δ_BABIP < 0 이면 자기 통산 대비 시즌 BABIP 도 낮아 두 지표 모두 불운으로 일치한다. "
-        "Δ_BABIP ≈ 0 또는 양수인데 luck 만 크게 음수면 Trout 패턴에 해당하며, ca-xBA 가 환경/"
-        "quality 측면에서 \"이 정도 quality 면 더 잘 쳤어야 한다\" 고 평가하나 BABIP 만으로는 "
-        "불운으로 보이지 않는 Front Office 의 저평가 발굴 포인트가 된다."
+        "Interpretation guide: a negative luck means fewer hits occurred than the contact quality "
+        "would predict. When Δ_BABIP < 0, the seasonal BABIP also falls below the player's career "
+        "baseline — both metrics agree on an unlucky outcome. When Δ_BABIP ≈ 0 or positive but luck "
+        "is strongly negative, this is the Trout pattern: ca-xBA judges from an environment/quality "
+        "perspective that \"this level of contact quality should have produced more hits,\" yet BABIP "
+        "alone does not flag it as unlucky — a potential Front Office undervaluation discovery point."
     )
     L.append("")
 
-    L.append("### 4.6 Trout · Schwarber 패턴 — 모델의 추가 정보 가치")
+    L.append("### 4.6 Trout–Schwarber Pattern — Additional Information Value of the Model")
     L.append("")
     L.append(
-        "본 분석에서 가장 흥미로운 케이스는 **Mike Trout** (luck 극불운, Δ_BABIP ≈ 0 또는 양수) 와 "
-        "**Kyle Schwarber** 다. Trout 는 통산 BABIP 가 매우 높은 elite contact hitter 라 "
-        "시즌 BABIP 도 평균 이상으로 유지되었지만, ca-xBA 기반 luck 는 극불운으로 평가된다. "
-        "이는 ca-xBA 가 \"이 정도 quality 의 contact 면 BABIP 보다 더 높은 안타 확률이 나왔어야 한다\" 는 "
-        "**환경·quality 보정 신호**를 단독으로 포착했다는 뜻이다."
+        "The most interesting cases in this analysis are **Mike Trout** (extreme unlucky luck, "
+        "Δ_BABIP ≈ 0 or positive) and **Kyle Schwarber**. Trout is an elite contact hitter with a "
+        "very high career BABIP, so his seasonal BABIP also stayed above average — yet his ca-xBA-based "
+        "luck is rated as extreme bad luck. This means ca-xBA independently captured an "
+        "**environment/quality-correction signal** that \"given this level of contact quality, hit "
+        "probability should have been higher than BABIP reflects.\""
     )
     L.append("")
     L.append(
-        "**Schwarber 패턴** (모델 한계 정직 명시): ca-xBA 가 *BIP-한정 quality* 를 평가하는 본질상 "
-        "fly ball power hitter (Schwarber 2025: NL MVP 2위, 56 HR 시즌) 는 luck = 음수로 평가되는 "
-        "**구조적 편향**이 존재한다. HR 은 ca-xBA 의 분자(안타)에 1 로 카운트되지만, fly ball "
-        "out 도 ca-xBA 가 \"이 quality 면 안타였어야 한다\" 라고 평가하는 경향이 있어 분모(BIP) 가 "
-        "분자보다 더 빠르게 증가한다. 진정한 불운 판단은 BABIP + 통산 BABIP + xwOBA underperform 등 "
-        "**외부 지표와의 교차 검증**이 필요하다 (위 §4.5 표의 Δ_BABIP 컬럼이 그 1차 교차 검증 역할)."
-    )
-    L.append("")
-
-    L.append("### 4.7 운/불운 Top 5 — 스카우팅 서사 + URL 출처 (사용자 작성 영역)")
-    L.append("")
-    L.append(
-        "> **방법론 (자동 fabrication 금지)**: Top 5 선수 각각에 대해 Baseball Savant 공식 프로필, "
-        "FanGraphs, Reddit r/baseball, MLB.com, Pitcher List 등 **실제 커뮤니티 분석과 스탯캐스트 팩트** 를 "
-        "마크다운 `[텍스트](URL)` 형식으로 출처 표기한다. **명확한 스카우팅 근거가 검색되지 않는 "
-        "선수는 \"명확한 스카우팅 근거가 검색되지 않아 표본 부족 또는 단순 부진으로 분류함\" 으로 "
-        "솔직히 명시**해야 하며, **추정·창작은 절대 금지**한다."
-    )
-    L.append("")
-    L.append(
-        "_본 자동 리포트는 객관적 수치(시즌/통산 BABIP 포함) 만 표기하며, Top 5 스카우팅 서사는 "
-        "위 표의 선수명·Δ_BABIP·luck 를 기반으로 외부 출처에서 검증 후 보강하는 별도 작업 영역이다._"
+        "**Schwarber pattern** (model limitation disclosed): Because ca-xBA evaluates *BIP-restricted "
+        "quality* by design, fly-ball power hitters (Schwarber 2025: NL MVP runner-up, 56-HR season) "
+        "are subject to a **structural bias** toward negative luck. HRs count as 1 in the ca-xBA "
+        "numerator (hits), but fly-ball outs are also evaluated as \"should have been a hit at this "
+        "quality,\" causing the denominator (BIP) to grow faster than the numerator. A true unlucky "
+        "judgment requires **cross-validation with external metrics** such as BABIP, career BABIP, "
+        "and xwOBA underperformance (the Δ_BABIP column in the §4.5 table above serves as that "
+        "primary cross-check)."
     )
     L.append("")
 
-    L.append(f"## 5. 실버 슬러거 교차 검증 — 포지션별 ca-xBA Top {POSITION_TOPN}")
+    L.append("### 4.7 Lucky/Unlucky Top 5 — Scouting Narrative + URL Sources (Manual Section)")
     L.append("")
-    L.append("> **⚠️ 한계 명시 (선정 메커니즘 본질):** 실버 슬러거는 **현장 전문가(코치·매니저)의 정성적 투표**로 결정되는 시상이다. "
-             "MLB는 선정 기준에 사용되는 가중치·통계·평가 항목을 공개하지 않으며, 수상에는 **타격 외 요인** "
-             "(수비 가치, 명성, 미디어 노출, 팀 성적, 라이벌 경쟁자의 분산 등)이 작용한다. "
-             "따라서 본 검증은 ca-xBA 가 \"타격 능력 측면에서 도메인 전문가의 직관과 얼마나 정렬되는지\"를 **재미있게 살펴보는 도메인 일관성 점검**이지, "
-             "**모델의 설명력을 통계적으로 보증하는 과학적 검증 기법은 아니다.** "
-             "통계적·과학적 모델 검증은 § 3 의 R² 분석이 담당한다.")
+    L.append(
+        "> **Methodology (auto-fabrication prohibited)**: For each of the Top 5 players, cite "
+        "**actual community analyses and Statcast facts** from Baseball Savant official profiles, "
+        "FanGraphs, Reddit r/baseball, MLB.com, Pitcher List, etc., using Markdown `[text](URL)` "
+        "format. **For any player for whom a clear scouting basis cannot be found, honestly state "
+        "\"no clear scouting basis found — classified as small sample or general underperformance.\" "
+        "Speculation or fabrication is strictly prohibited.**"
+    )
     L.append("")
-    L.append(f"- 실버 슬러거 수상자: 20명 (AL 10 + NL 10)")
-    L.append(f"- ID 매칭 성공: 검증 가능 선수 {ss_summary['eligible']}/20")
-    L.append(f"- **포지션 Top {POSITION_TOPN} 적중: {ss_summary['hits']}/{ss_summary['eligible']} ({ss_summary['hit_rate']*100:.1f}%)**")
+    L.append(
+        "_This automated report records only objective figures (including seasonal/career BABIP). "
+        "The Top 5 scouting narratives are a separate manual section to be supplemented after "
+        "external verification based on the player names, Δ_BABIP, and luck values in the tables above._"
+    )
     L.append("")
-    L.append("| 리그 | 포지션 | 수상자 | 우리 ca-xBA 순위 | Top N 적중 | ca-xBA | wOBA |")
+
+    L.append(f"## 5. Silver Slugger Cross-Validation — Position-by-Position ca-xBA Top {POSITION_TOPN}")
+    L.append("")
+    L.append("> **⚠️ Limitation disclosure (nature of the selection mechanism):** The Silver Slugger is awarded via "
+             "**qualitative voting by on-field experts (coaches and managers)**. "
+             "MLB does not publish the weights, statistics, or evaluation criteria used in the selection process, "
+             "and the award is influenced by **factors beyond hitting** "
+             "(defensive value, reputation, media exposure, team performance, vote splitting among rivals, etc.). "
+             "Therefore this validation is a **fun domain-consistency check** to see how well ca-xBA aligns with "
+             "domain experts' intuition on batting ability — it is **not a scientific validation technique that "
+             "statistically guarantees model explanatory power.** "
+             "Statistical and scientific model validation is handled by the R² analysis in § 3.")
+    L.append("")
+    L.append(f"- Silver Slugger winners: 20 players (AL 10 + NL 10)")
+    L.append(f"- ID match success: {ss_summary['eligible']}/20 eligible players")
+    L.append(f"- **Position Top {POSITION_TOPN} hit rate: {ss_summary['hits']}/{ss_summary['eligible']} ({ss_summary['hit_rate']*100:.1f}%)**")
+    L.append("")
+    L.append("| League | Position | Winner | Our ca-xBA Rank | Top N Hit | ca-xBA | wOBA |")
     L.append("|---|---|---|---:|:---:|---:|---:|")
     missing_players: list[str] = []
     for _, r in ss_full.iterrows():
@@ -1037,28 +1055,29 @@ def write_report(
     L.append("")
     if missing_players:
         L.append(
-            f"> **※ 누락 선수 해명 ({len(missing_players)} 명: {', '.join(missing_players)})**: "
-            "본 검증의 데이터 조인은 Statcast `expected_stats` 의 `player_id` (MLBAM ID) 와 "
-            "MLB Stats API 의 포지션 정보를 **정확 일치(Hard Join)** 방식으로 매칭한다. "
-            "이는 동명이인 오염을 원천 차단하기 위한 학술적 안전장치(사용자 결정 #4)다. "
-            "단, **Statcast 의 다국어 선수 철자 표기 (예: José Ramírez 의 accent 기호, "
-            "Peña 의 ñ 등 라틴/스페인어 특수 기호) 가 MLB Stats API 의 표준 영문 표기와 "
-            "byte-level 로 일치하지 않는 경우** 조인이 실패하여 검증 풀에서 누락된다. "
-            "추가로 250 PA 미만 (예: 시즌 도중 트레이드된 일부 선수) 의 경우에도 우리 "
-            "분석군 (PA ≥ 250) 에서 제외된다. 본 누락은 **모델 성능과 무관한 데이터 정제 "
-            "이슈**이며, 향후 작업에서 fuzzy matching 또는 Chadwick Register 의 ID 크로스워크를 "
-            "도입하여 해소 가능하다."
+            f"> **※ Missing player explanation ({len(missing_players)} player(s): {', '.join(missing_players)})**: "
+            "The data join in this validation matches Statcast `expected_stats` `player_id` (MLBAM ID) "
+            "with MLB Stats API position data using **exact (hard) join**. "
+            "This is an academic safeguard against name-collision contamination (user decision #4). "
+            "However, **when Statcast's multilingual player name spelling "
+            "(e.g., accent marks in José Ramírez, ñ in Peña, and other Latin/Spanish special characters) "
+            "does not match the standard ASCII representation in the MLB Stats API at the byte level**, "
+            "the join fails and the player is excluded from the validation pool. "
+            "Additionally, players with fewer than 250 PA (e.g., some players traded mid-season) are also "
+            "excluded from our analysis group (PA ≥ 250). These exclusions are **data-cleaning issues "
+            "unrelated to model performance** and can be resolved in future work by introducing "
+            "fuzzy matching or the Chadwick Register ID crosswalk."
         )
         L.append("")
 
-    L.append("## 6. 산출물")
+    L.append("## 6. Outputs")
     L.append("")
     L.append(
-        f"- `{PLAYER_METRICS_CSV.relative_to(ROOT)}` — 선수별 ca-xBA · wOBA · luck · position\n"
-        f"- `{SILVER_SLUGGER_VAL_CSV.relative_to(ROOT)}` — 실버 슬러거 20명 검증\n"
-        f"- `{RESULTS_JSON.relative_to(ROOT)}` — 요약 메트릭 JSON\n"
-        f"- `{POSITIONS_CACHE.relative_to(ROOT)}` — MLB Stats API 포지션 캐시\n"
-        f"- `pipeline/logs/step5.log` — 실행 로그"
+        f"- `{PLAYER_METRICS_CSV.relative_to(ROOT)}` — per-player ca-xBA, wOBA, luck, position\n"
+        f"- `{SILVER_SLUGGER_VAL_CSV.relative_to(ROOT)}` — Silver Slugger 20-player validation\n"
+        f"- `{RESULTS_JSON.relative_to(ROOT)}` — summary metrics JSON\n"
+        f"- `{POSITIONS_CACHE.relative_to(ROOT)}` — MLB Stats API position cache\n"
+        f"- `pipeline/logs/step5.log` — execution log"
     )
     L.append("")
 

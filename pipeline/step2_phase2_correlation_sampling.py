@@ -264,13 +264,13 @@ def correlation_drop_domain_priority(
                 rule = ""
                 if a in X_BASE and b in X_BASE:
                     drop_target = None
-                    rule = "X_BASE 둘 다 보존"
+                    rule = "preserve both X_BASE"
                 elif a in X_BASE:
                     drop_target = b
-                    rule = "X_BASE 보호"
+                    rule = "X_BASE protected"
                 elif b in X_BASE:
                     drop_target = a
-                    rule = "X_BASE 보호"
+                    rule = "X_BASE protected"
                 elif is_derived(a) and not is_derived(b):
                     drop_target = a
                     rule = "derived drop"
@@ -520,96 +520,96 @@ def feature_selection(
 def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     L: list[str] = []
-    L.append("# Phase 2 Report — 상관관계 분석, 스케일링, 최적 샘플링, Feature Selection")
+    L.append("# Phase 2 Report — Correlation Analysis, Scaling, Optimal Sampling, Feature Selection")
     L.append("")
-    L.append(f"_생성: {now}_  ")
-    L.append("_실행 스크립트: `pipeline/step2_phase2_correlation_sampling.py`_")
+    L.append(f"_Generated: {now}_  ")
+    L.append("_Script: `pipeline/step2_phase2_correlation_sampling.py`_")
     L.append("")
-    L.append("> 본 단계는 **2024_data.parquet 만** 사용한다. 2025_data는 Phase 5까지 격리되어 어떤 통계도 누설되지 않는다.")
+    L.append("> This phase uses **2024_data.parquet only**. 2025_data is isolated until Phase 5 — no statistics are leaked.")
     L.append("")
 
     # Decisions
-    L.append("## 1. 결정 사항 (사용자 컨펌, Phase 1 dome-masking 이후 분기 전수 재확인)")
+    L.append("## 1. Decisions (user-confirmed; all branches re-verified after Phase 1 dome-masking)")
     L.append("")
-    L.append("| # | 결정 항목 | 채택안 | 사유 |")
+    L.append("| # | Decision Item | Adopted Approach | Rationale |")
     L.append("|---|---|---|---|")
-    L.append("| 1 | X_base 정의 | `launch_speed`, `launch_angle` (2종) | MLB 공식 xBA와 동일 입력으로 통제군 명료화. |")
-    L.append("| 2 | 카테고리형 인코딩 | One-Hot (stand/p_throws=L/R binary, pitch_type·alignment=dummy) | 카테고리 적어 차원 폭발 없음. |")
-    L.append("| 3 | Train/Test 분할 | **2025는 검증 전용 격리** / 2024 안에서 **StratifiedKFold 5-fold CV (train+val 통합)** | data leakage 0. CV가 hold-out test 대체. |")
-    L.append("| 4 | X_advanced 초기 변수 풀 | 광범위 정의(투구·PA·구장·기상 모두) | FS·공선성 단계에서 정리하도록 설계. |")
-    L.append(f"| 5 | 다중공선성 임계값 | **|r| > {CORR_THRESHOLD}** (Pearson) | 거의 동일한 변수만 제거하는 보수적 기준. |")
-    L.append("| 6 | 다중공선성 drop 규칙 | X_BASE 보존 → **derived 변수 우선 drop** → variance fallback | 도메인 의미 우선(소스 > 파생). derived: `effective_speed`, `api_break_*`, `wx_wind_gusts_10m`, `max_wall_height`. |")
-    L.append("| 7 | 처리 순서 | impute → scale → corr_drop → sampling → FS | scale 후 corr 안정성 + variance fallback 적용 위해. |")
-    L.append("| 8 | Robust Scaler | numeric만(unique>2) | 이상치 강건. LogReg(Phase 3 통제군) 호환. |")
-    L.append("| 9 | NaN imputation (numeric) | **2024 전체 median fill** | CV 격자에 같은 imputation. *_is_missing 플래그는 신호 보존. |")
-    L.append("| 10 | NaN 카테고리 처리 | NaN → 'UNK' 더미 | 결측 패턴을 카테고리로 보존. |")
-    L.append("| 11 | 상호작용 FE | **Raw 그대로** (트리에 맡김) | dome-masking이 dome-day 시그널을 충분히 전달. 명시적 product feature 추가 없음. |")
-    L.append("| 12 | 샘플링 비교 | None / RandomUnderSampler / SMOTE 3종 **모두** | 결과 비교 후 선택. 사전 가정 배제. |")
-    L.append(f"| 13 | 샘플링 평가 모델 | XGBoost **default** + StratifiedKFold {CV_FOLDS}-fold CV | 모델 가설 중립. baseline default 공정 비교. |")
-    L.append("| 14 | 샘플링 선정 메트릭 | **Brier Score (OOF predict_proba)** 최솟값 | ca-xBA는 확률 값의 정상도가 핵심. F1·AUC는 보조 표시. |")
-    L.append("| 15 | EDA 범위 | Pearson 상관, \\|r\\|>0.95 중복 제거, RF importance, MI | 다관점 신호 종합. |")
-    L.append("| 16 | FS 계산용 모델 | RF (RandomizedSearchCV 튜닝된 best_estimator) — split impurity 기반 `feature_importances_` | 이전 step2 검증된 방식 복원. 3-model Permutation Importance 는 macOS joblib memmap 디스크 한계로 미채택. |")
-    L.append(f"| 17 | FS 제거 규칙 | **2개 기준(RF importance & MI) 모두 하위 {(1-FS_DROP_RANK_THRESHOLD)*100:.0f}% 동시 진입** 시 drop (X_BASE 제외) | 보수적 — 한 지표라도 중요하면 보존. |")
-    L.append(f"| 18 | RF 하이퍼파라미터 (FS용) | RandomizedSearchCV: search space `{RF_SEARCH_SPACE}` / n_iter={RF_SEARCH_N_ITER}, cv={RF_SEARCH_CV}, scoring=neg_brier_score | importance 수치 신뢰성 확보. |")
-    L.append(f"| 19 | MI subsample | Stratified {MI_SUBSAMPLE_SIZE:,d}행 (is_hit 비율 유지), seed={RANDOM_STATE} | 통계 안정성+연산 효율. |")
-    L.append(f"| 20 | M2 발열 관리 | 단계 간 `time.sleep({COOLDOWN_SEC}s)`, `n_jobs={N_JOBS_HEAVY}` | 노트북 thermal throttling 완화. |")
+    L.append("| 1 | X_base definition | `launch_speed`, `launch_angle` (2 features) | Matches MLB official xBA inputs, providing a clean control group. |")
+    L.append("| 2 | Categorical encoding | One-Hot (stand/p_throws=L/R binary, pitch_type·alignment=dummy) | Few categories; no dimensionality explosion. |")
+    L.append("| 3 | Train/Test split | **2025 isolated as validation only** / within 2024: **StratifiedKFold 5-fold CV (train+val combined)** | Zero data leakage. CV replaces hold-out test. |")
+    L.append("| 4 | X_advanced initial feature pool | Broadly defined (pitch, PA, park, weather all included) | Designed to be pruned by multicollinearity and FS stages. |")
+    L.append(f"| 5 | Multicollinearity threshold | **|r| > {CORR_THRESHOLD}** (Pearson) | Conservative criterion — removes only near-identical features. |")
+    L.append("| 6 | Multicollinearity drop rule | Preserve X_BASE → **drop derived features first** → variance fallback | Domain semantics take priority (source > derived). Derived: `effective_speed`, `api_break_*`, `wx_wind_gusts_10m`, `max_wall_height`. |")
+    L.append("| 7 | Processing order | impute → scale → corr_drop → sampling → FS | Ensures correlation stability after scaling and enables variance fallback. |")
+    L.append("| 8 | Robust Scaler | numeric only (unique>2) | Robust to outliers; compatible with LogReg (Phase 3 control). |")
+    L.append("| 9 | NaN imputation (numeric) | **Full 2024 median fill** | Same imputation applied across all CV folds. *_is_missing flags preserve the missingness signal. |")
+    L.append("| 10 | NaN categorical handling | NaN → 'UNK' dummy | Preserves missingness patterns as a category. |")
+    L.append("| 11 | Interaction FE | **Raw as-is** (delegated to tree models) | dome-masking already conveys dome-day signals adequately. No explicit product features added. |")
+    L.append("| 12 | Sampling comparison | **All three**: None / RandomUnderSampler / SMOTE | Selection made after comparing results. No prior assumptions. |")
+    L.append(f"| 13 | Sampling evaluation model | XGBoost **default** + StratifiedKFold {CV_FOLDS}-fold CV | Model-hypothesis neutral. Fair comparison with default baseline. |")
+    L.append("| 14 | Sampling selection metric | Minimum **Brier Score (OOF predict_proba)** | ca-xBA hinges on probability calibration quality. F1 and AUC are supplementary. |")
+    L.append("| 15 | EDA scope | Pearson correlation, \\|r\\|>0.95 deduplication, RF importance, MI | Multi-perspective signal aggregation. |")
+    L.append("| 16 | FS computation model | RF (RandomizedSearchCV-tuned best_estimator) — split-impurity `feature_importances_` | Restores the validated approach from the previous step2. 3-model Permutation Importance excluded due to macOS joblib memmap disk limitations. |")
+    L.append(f"| 17 | FS drop rule | **Drop when both criteria (RF importance & MI) simultaneously fall in the bottom {(1-FS_DROP_RANK_THRESHOLD)*100:.0f}%** (X_BASE excluded) | Conservative — retained if important by either metric. |")
+    L.append(f"| 18 | RF hyperparameters (for FS) | RandomizedSearchCV: search space `{RF_SEARCH_SPACE}` / n_iter={RF_SEARCH_N_ITER}, cv={RF_SEARCH_CV}, scoring=neg_brier_score | Ensures reliability of importance estimates. |")
+    L.append(f"| 19 | MI subsample | Stratified {MI_SUBSAMPLE_SIZE:,d} rows (is_hit ratio preserved), seed={RANDOM_STATE} | Statistical stability + computational efficiency. |")
+    L.append(f"| 20 | M2 thermal management | `time.sleep({COOLDOWN_SEC}s)` between stages, `n_jobs={N_JOBS_HEAVY}` | Mitigates laptop thermal throttling. |")
     L.append("")
 
     # Feature pool construction
-    L.append("## 2. 변수 그룹 정의 및 초기 풀 구성")
+    L.append("## 2. Feature Group Definitions and Initial Pool Construction")
     L.append("")
-    L.append("| 그룹 | 변수 수 | 내용 |")
+    L.append("| Group | # Features | Description |")
     L.append("|---|---:|---|")
-    L.append(f"| (a) xBA 핵심 | {len(X_BASE)} | launch_speed, launch_angle |")
-    L.append(f"| (b) 배트 트래킹 + 결측플래그 | {len(BAT_TRACKING) + len(BAT_TRACKING_FLAGS)} | 7 numeric + 7 *_is_missing |")
-    L.append(f"| (c) 타석 정체성 (binary) | 2 | stand_R, p_throws_R |")
-    L.append(f"| (d) 투구 물리 (numeric) | {len(PITCH_NUMERIC)} | release_speed, pfx_*, plate_*, spin, break, arm_angle 등 |")
-    L.append("| (d2) pitch_type one-hot | (가변) | pitch_type_* 더미 변수 |")
-    L.append(f"| (e) PA 상황 (numeric) | {len(PA_NUMERIC)} | balls/strikes/outs/inning/age/order 등 |")
-    L.append("| (e2) alignment one-hot | (가변) | if/of_fielding_alignment 더미 |")
-    L.append(f"| (f) 구장 정적 | {len(PARK_STATIC)} | 펜스거리·높이·hr_park_effects·extra_distance·고도·roof·daytime |")
-    L.append(f"| (g) 기상 동적 (dome-masked) | {len(WEATHER_DYNAMIC)} | 온도·습도·기압·풍속·풍향·강수·운량·돌풍 — closed roof일 시 외부 5종=0, 실내 기온 22°C/습도 50% 대체 (Phase 1 §7b) |")
-    L.append(f"| **X_advanced 초기(One-Hot 후)** | **{meta['initial_n_features']}** | |")
+    L.append(f"| (a) xBA core | {len(X_BASE)} | launch_speed, launch_angle |")
+    L.append(f"| (b) Bat tracking + missingness flags | {len(BAT_TRACKING) + len(BAT_TRACKING_FLAGS)} | 7 numeric + 7 *_is_missing |")
+    L.append(f"| (c) Batter/pitcher handedness (binary) | 2 | stand_R, p_throws_R |")
+    L.append(f"| (d) Pitch physics (numeric) | {len(PITCH_NUMERIC)} | release_speed, pfx_*, plate_*, spin, break, arm_angle, etc. |")
+    L.append("| (d2) pitch_type one-hot | (variable) | pitch_type_* dummy variables |")
+    L.append(f"| (e) PA situation (numeric) | {len(PA_NUMERIC)} | balls/strikes/outs/inning/age/order, etc. |")
+    L.append("| (e2) alignment one-hot | (variable) | if/of_fielding_alignment dummies |")
+    L.append(f"| (f) Park static | {len(PARK_STATIC)} | fence distances/heights, hr_park_effects, extra_distance, elevation, roof, daytime |")
+    L.append(f"| (g) Weather dynamic (dome-masked) | {len(WEATHER_DYNAMIC)} | temp, humidity, pressure, wind speed/direction, precipitation, cloud cover, gusts — when closed roof: 5 outdoor vars=0, indoor temp 22°C/humidity 50% substituted (Phase 1 §7b) |")
+    L.append(f"| **X_advanced initial (after One-Hot)** | **{meta['initial_n_features']}** | |")
     L.append("")
 
     # NaN imputation
-    L.append("## 3. NaN 처리 (전체 2024 median 기반 imputation)")
+    L.append("## 3. NaN Handling (full 2024 median-based imputation)")
     L.append("")
-    L.append(f"- 결측 imputation 적용 컬럼 수: **{len(meta['imputation_medians'])}**")
-    L.append("- *_is_missing 플래그는 결측 패턴 자체를 신호로 보존.")
+    L.append(f"- Columns with imputation applied: **{len(meta['imputation_medians'])}**")
+    L.append("- *_is_missing flags preserve the missingness pattern itself as a signal.")
     if meta["imputation_medians"]:
         L.append("")
-        L.append("| 컬럼 | 2024 Median |")
+        L.append("| Column | 2024 Median |")
         L.append("|---|---:|")
         for col, med in list(meta["imputation_medians"].items())[:25]:
             L.append(f"| `{col}` | {med:.4f} |")
         if len(meta["imputation_medians"]) > 25:
-            L.append(f"| ... 외 {len(meta['imputation_medians']) - 25}개 | |")
+            L.append(f"| ... and {len(meta['imputation_medians']) - 25} more | |")
     L.append("")
 
     # CV structure
-    L.append(f"## 4. Cross-Validation 구조 ({CV_FOLDS}-fold StratifiedKFold)")
+    L.append(f"## 4. Cross-Validation Structure ({CV_FOLDS}-fold StratifiedKFold)")
     L.append("")
-    L.append(f"- 2024 전체 {meta['n_full']:,}행 → StratifiedKFold(n_splits={CV_FOLDS}, shuffle=True, random_state={RANDOM_STATE})")
-    L.append(f"- 안타율(전체): {meta['full_hit_rate']:.4f}")
-    L.append("- **2025는 Phase 5 외부 검증 전용** — 본 단계에서 어떤 통계도 사용하지 않음")
+    L.append(f"- Full 2024: {meta['n_full']:,} rows → StratifiedKFold(n_splits={CV_FOLDS}, shuffle=True, random_state={RANDOM_STATE})")
+    L.append(f"- Overall hit rate: {meta['full_hit_rate']:.4f}")
+    L.append("- **2025 is reserved for Phase 5 external validation only** — no statistics from it are used in this phase")
     L.append("")
 
     # Multicollinearity
-    L.append(f"## 5. 다중공선성 분석 (|r| > {CORR_THRESHOLD}, Pearson)")
+    L.append(f"## 5. Multicollinearity Analysis (|r| > {CORR_THRESHOLD}, Pearson)")
     L.append("")
-    L.append(f"- 식별된 고상관 쌍: **{len(hi_corr_pairs)}건**")
-    L.append(f"- 최종 제거된 변수 수: **{len(meta['dropped_via_correlation'])}개**")
+    L.append(f"- High-correlation pairs identified: **{len(hi_corr_pairs)}**")
+    L.append(f"- Features removed in total: **{len(meta['dropped_via_correlation'])}**")
     L.append("")
     if hi_corr_pairs:
         unique_pairs = {(min(p['a'], p['b']), max(p['a'], p['b'])): p for p in hi_corr_pairs}
         sorted_pairs = sorted(unique_pairs.values(), key=lambda x: -x["abs_r"])
-        L.append("**고상관 쌍 (|r| 내림차순, 상위 30개) — `var_a/var_b`는 RobustScaler 후 분산**")
+        L.append("**High-correlation pairs (|r| descending, top 30) — `var_a/var_b` are post-RobustScaler variances**")
         L.append("")
-        L.append("| 변수 A | 변수 B | abs(r) | var_a | var_b | 제거 | 규칙 |")
+        L.append("| Feature A | Feature B | abs(r) | var_a | var_b | Dropped | Rule |")
         L.append("|---|---|---:|---:|---:|---|---|")
         for p in sorted_pairs[:30]:
-            dropped = p["dropped"] if p["dropped"] else "(보존)"
+            dropped = p["dropped"] if p["dropped"] else "(retained)"
             va = p.get("var_a", float("nan"))
             vb = p.get("var_b", float("nan"))
             L.append(
@@ -617,26 +617,26 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
                 f"{va:.3f} | {vb:.3f} | `{dropped}` | {p['rule']} |"
             )
         if len(sorted_pairs) > 30:
-            L.append(f"| _(외 {len(sorted_pairs) - 30}건)_ | | | | | | |")
+            L.append(f"| _({len(sorted_pairs) - 30} more)_ | | | | | | |")
         L.append("")
-    L.append("**제거된 변수 전체 목록:**")
+    L.append("**Full list of removed features:**")
     L.append("")
-    L.append(", ".join(f"`{c}`" for c in meta["dropped_via_correlation"]) or "_(없음)_")
+    L.append(", ".join(f"`{c}`" for c in meta["dropped_via_correlation"]) or "_(none)_")
     L.append("")
 
     # Scaling
     L.append("## 6. Robust Scaler")
     L.append("")
-    L.append(f"- 스케일 적용 컬럼: **{len(meta['scale_cols'])}**개 (이진 0/1 변수는 제외)")
-    L.append(f"- 2024 전체 fit, transform → `pipeline/output/phase2_scaler.joblib`")
+    L.append(f"- Columns scaled: **{len(meta['scale_cols'])}** (binary 0/1 variables excluded)")
+    L.append(f"- Fit and transformed on full 2024 → `pipeline/output/phase2_scaler.joblib`")
     L.append("")
 
     # Sampling comparison
-    L.append(f"## 7. 샘플링 비교 (3종 × XGBoost default × {CV_FOLDS}-fold CV)")
+    L.append(f"## 7. Sampling Comparison (3 strategies × XGBoost default × {CV_FOLDS}-fold CV)")
     L.append("")
-    L.append("**OOF (Out-Of-Fold) predict_proba 기반 메트릭:**")
+    L.append("**OOF (Out-Of-Fold) predict_proba-based metrics:**")
     L.append("")
-    L.append("| 샘플링 | Train mean 0/1 | **OOF Brier** | OOF LogLoss | OOF F1 | OOF AUC | OOF P/R | fold Brier mean±SD |")
+    L.append("| Sampling | Train mean 0/1 | **OOF Brier** | OOF LogLoss | OOF F1 | OOF AUC | OOF P/R | fold Brier mean±SD |")
     L.append("|---|---:|---:|---:|---:|---:|---:|---:|")
     for name, r in meta["sampling_results"].items():
         L.append(
@@ -647,14 +647,14 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
             f"{r['fold_brier_mean']:.5f}±{r['fold_brier_std']:.5f} |"
         )
     L.append("")
-    L.append(f"- **최종 선정 샘플링: `{meta['best_sampling']}`** (OOF Brier 기준 최소)")
-    L.append(f"- 선정 사유: OOF predict_proba 의 Brier(=평균 (y-p)²) 가 가장 낮은 기법. 확률 정상도 우선.")
+    L.append(f"- **Final selected sampling: `{meta['best_sampling']}`** (minimum OOF Brier)")
+    L.append(f"- Selection rationale: the technique with the lowest OOF predict_proba Brier score (= mean (y−p)²). Probability calibration is the primary criterion.")
     L.append("")
 
     # Feature Selection
     L.append("## 8. Feature Selection (RF importance + MI)")
     L.append("")
-    L.append(f"- 학습 데이터: 최적 샘플링(`{meta['best_sampling']}`) 적용 X")
+    L.append(f"- Training data: X with best sampling (`{meta['best_sampling']}`) applied")
     L.append(
         f"- **RF Tuning**: `RandomizedSearchCV(n_iter={meta['rf_search_n_iter']}, "
         f"cv={meta['rf_search_cv']}, scoring='neg_brier_score', n_jobs={N_JOBS_HEAVY})`"
@@ -665,12 +665,12 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
         f"  - **best CV neg_brier_score (3-fold avg)**: {meta['rf_best_cv_score']:.5f} "
         f"(Brier = {-meta['rf_best_cv_score']:.5f})"
     )
-    L.append(f"- **Mutual Information**: stratified {MI_SUBSAMPLE_SIZE:,d}행 subsample, seed={RANDOM_STATE}")
+    L.append(f"- **Mutual Information**: stratified {MI_SUBSAMPLE_SIZE:,d}-row subsample, seed={RANDOM_STATE}")
     L.append(
-        f"- 제거 규칙: **RF importance & MI 둘 다 하위 {(1-FS_DROP_RANK_THRESHOLD)*100:.0f}% 동시 진입** "
-        f"시 drop (X_BASE 제외)"
+        f"- Drop rule: **drop when RF importance & MI both simultaneously fall in the bottom {(1-FS_DROP_RANK_THRESHOLD)*100:.0f}%** "
+        f"(X_BASE excluded)"
     )
-    L.append("- 비고: 당초 3-model Permutation Importance 안이 채택되었으나, macOS joblib memmap 디스크 한계(RF default fit-된 모델의 worker 직렬화 시 OSError 28)로 인해 검증된 이전 step2 방식(RF RandomizedSearchCV → `feature_importances_` + MI)으로 복원.")
+    L.append("- Note: The original 3-model Permutation Importance approach was adopted but subsequently reverted to the validated previous step2 method (RF RandomizedSearchCV → `feature_importances_` + MI) due to macOS joblib memmap disk limitations (OSError 28 during worker serialization of the RF default-fitted model).")
     L.append("")
 
     rf_imp = fs_artifacts["rf_importance"]
@@ -678,7 +678,7 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
 
     L.append("### 8.1 RF Importance Top 20")
     L.append("")
-    L.append("| Rank | 변수 | Importance |")
+    L.append("| Rank | Feature | Importance |")
     L.append("|---:|---|---:|")
     for i, (col, val) in enumerate(rf_imp.head(20).items(), 1):
         L.append(f"| {i} | `{col}` | {val:.5f} |")
@@ -686,41 +686,41 @@ def write_report(meta: dict, hi_corr_pairs: list[dict], fs_artifacts: dict):
 
     L.append("### 8.2 Mutual Information Top 20")
     L.append("")
-    L.append("| Rank | 변수 | MI |")
+    L.append("| Rank | Feature | MI |")
     L.append("|---:|---|---:|")
     for i, (col, val) in enumerate(mi.head(20).items(), 1):
         L.append(f"| {i} | `{col}` | {val:.5f} |")
     L.append("")
 
-    L.append(f"### 8.3 Feature Selection으로 제거된 변수 ({len(meta['dropped_via_feature_selection'])}개)")
+    L.append(f"### 8.3 Features Removed by Feature Selection ({len(meta['dropped_via_feature_selection'])})")
     L.append("")
-    L.append(", ".join(f"`{c}`" for c in meta["dropped_via_feature_selection"]) or "_(없음)_")
+    L.append(", ".join(f"`{c}`" for c in meta["dropped_via_feature_selection"]) or "_(none)_")
     L.append("")
 
     # Final X_advanced
-    L.append("## 9. 최종 X_advanced 변수 확정")
+    L.append("## 9. Final X_advanced Feature Set")
     L.append("")
-    L.append(f"- X_BASE: **{len(X_BASE)}개** — Phase 3 통제군용")
-    L.append(f"- X_advanced 초기: **{meta['initial_n_features']}개**")
-    L.append(f"- 다중공선성 drop: **{len(meta['dropped_via_correlation'])}개**")
-    L.append(f"- Feature Selection drop: **{len(meta['dropped_via_feature_selection'])}개**")
-    L.append(f"- **X_advanced 최종: {len(meta['X_advanced_final'])}개**")
+    L.append(f"- X_BASE: **{len(X_BASE)} features** — Phase 3 control group")
+    L.append(f"- X_advanced initial: **{meta['initial_n_features']} features**")
+    L.append(f"- Multicollinearity drop: **{len(meta['dropped_via_correlation'])} features**")
+    L.append(f"- Feature Selection drop: **{len(meta['dropped_via_feature_selection'])} features**")
+    L.append(f"- **X_advanced final: {len(meta['X_advanced_final'])} features**")
     L.append("")
-    L.append("**X_advanced 최종 변수 목록:**")
+    L.append("**X_advanced final feature list:**")
     L.append("")
     L.append(", ".join(f"`{c}`" for c in meta["X_advanced_final"]))
     L.append("")
 
     # Artifacts
-    L.append("## 10. 산출물")
+    L.append("## 10. Artifacts")
     L.append("")
     L.append(
-        "- `pipeline/output/phase2_X_full.parquet` (2024 전체, 스케일·corr-drop·FS-drop 적용된 최종 X)\n"
-        "- `pipeline/output/phase2_y_full.parquet` (2024 전체 is_hit)\n"
-        "- `pipeline/output/phase2_scaler.joblib` (RobustScaler + scale_cols 메타)\n"
-        "- `pipeline/output/phase2_features.json` (X_base / X_advanced / drop 이력 등)\n"
-        "- `pipeline/output/phase2_fs_ranking.csv` (RF importance + MI raw 점수 + percentile rank + drop 플래그)\n"
-        "- Phase 3 이후는 본 `phase2_X_full.parquet` + 5-fold CV 동일 splits 으로 일관 비교"
+        "- `pipeline/output/phase2_X_full.parquet` (full 2024, final X with scaling/corr-drop/FS-drop applied)\n"
+        "- `pipeline/output/phase2_y_full.parquet` (full 2024 is_hit)\n"
+        "- `pipeline/output/phase2_scaler.joblib` (RobustScaler + scale_cols metadata)\n"
+        "- `pipeline/output/phase2_features.json` (X_base / X_advanced / drop history, etc.)\n"
+        "- `pipeline/output/phase2_fs_ranking.csv` (RF importance + MI raw scores + percentile rank + drop flag)\n"
+        "- Phase 3 onward uses this `phase2_X_full.parquet` + identical 5-fold CV splits for consistent comparison"
     )
     L.append("")
 

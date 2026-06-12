@@ -156,51 +156,52 @@ def patch_report(insample_m: dict, oof_m: dict, raw_m: dict, elapsed_min: float)
 
     # Additional section text (inserted after §6, before §7 overall comparison)
     extra = []
-    extra.append("### 6.2 Stacking Post-hoc Calibration — 진단 보강 (2차 실행)")
+    extra.append("### 6.2 Stacking Post-hoc Calibration — Diagnostic Reinforcement (2nd Run)")
     extra.append("")
-    extra.append("**1차 실행 결과 (in-sample Isotonic) 의 이상:**")
+    extra.append("**Anomaly observed in 1st-run results (in-sample Isotonic):**")
     extra.append("")
     extra.append(
         f"- Brier: raw {raw_m['brier']:.4f} → in-sample isotonic {insample_m['brier']:.4f} "
-        f"({insample_m['brier'] - raw_m['brier']:+.4f}, **악화**)"
+        f"({insample_m['brier'] - raw_m['brier']:+.4f}, **degraded**)"
     )
     extra.append(
         f"- LogLoss: raw {raw_m['log_loss']:.4f} → in-sample isotonic {insample_m['log_loss']:.4f} "
-        f"({insample_m['log_loss'] - raw_m['log_loss']:+.4f}, **급악화**)"
+        f"({insample_m['log_loss'] - raw_m['log_loss']:+.4f}, **sharply degraded**)"
     )
     extra.append("")
-    extra.append("**원인 진단:**")
+    extra.append("**Root-cause diagnosis:**")
     extra.append("")
     extra.append(
-        "`StackingClassifier(cv=5)` 는 `final_estimator` 학습에만 OOF 를 사용하고, refit 단계에서 "
-        "base estimators (RF/XGB/LGBM Pipeline) 를 **전체 X_train 으로 재학습** 한다. 따라서 "
-        "`stack.predict_proba(X_train)` 은 base 입장에서 in-sample → overfit. 이 overfit 분포에 "
-        "IsotonicRegression 을 학습시키면 calibration 함수가 test 분포와 부적합하게 형성되어 "
-        "예측 확률 보정이 깨진다 (특히 LogLoss 가 양 극단 예측의 미세한 오류에 매우 민감하므로 급악화)."
+        "`StackingClassifier(cv=5)` uses OOF only for training the `final_estimator`; during the "
+        "refit stage it retrains base estimators (RF/XGB/LGBM Pipeline) **on the full X_train**. "
+        "Therefore `stack.predict_proba(X_train)` is in-sample from the bases' perspective → overfit. "
+        "Fitting IsotonicRegression on this overfit distribution produces a calibration function "
+        "misaligned with the test distribution, breaking probability recalibration "
+        "(LogLoss is especially sensitive to small errors at extreme predictions, hence the sharp degradation)."
     )
     extra.append("")
-    extra.append("**정석 재실행: `CalibratedClassifierCV(stack, method='isotonic', cv=3)`**")
+    extra.append("**Canonical re-run: `CalibratedClassifierCV(stack, method='isotonic', cv=3)`**")
     extra.append("")
     extra.append(
-        f"- Stacking 자체를 cv=3 fold 로 재학습 → 각 fold 의 OOF predictions 에 Isotonic 학습 "
-        f"→ test 와 분포 일관. 비용: stacking 학습 × 3 ≈ {elapsed_min:.1f}분."
+        f"- Retrain Stacking itself via cv=3 folds → fit Isotonic on each fold's OOF predictions "
+        f"→ distribution consistent with test set. Cost: stacking training × 3 ≈ {elapsed_min:.1f} min."
     )
     extra.append("")
-    extra.append("| 단계 | F1 | AUC | Brier↓ | LogLoss↓ | P | R | Acc |")
+    extra.append("| Stage | F1 | AUC | Brier↓ | LogLoss↓ | P | R | Acc |")
     extra.append("|---|---:|---:|---:|---:|---:|---:|---:|")
     extra.append(
-        f"| stack_raw (1차) | {raw_m['f1']:.4f} | {raw_m['roc_auc']:.4f} | "
+        f"| stack_raw (1st run) | {raw_m['f1']:.4f} | {raw_m['roc_auc']:.4f} | "
         f"{raw_m['brier']:.4f} | {raw_m['log_loss']:.4f} | "
         f"{raw_m['precision']:.4f} | {raw_m['recall']:.4f} | {raw_m['accuracy']:.4f} |"
     )
     extra.append(
-        f"| stack_isotonic_insample (1차, 진단용) | {insample_m['f1']:.4f} | "
+        f"| stack_isotonic_insample (1st run, diagnostic) | {insample_m['f1']:.4f} | "
         f"{insample_m['roc_auc']:.4f} | "
         f"⚠️ {insample_m['brier']:.4f} | ⚠️ {insample_m['log_loss']:.4f} | "
         f"{insample_m['precision']:.4f} | {insample_m['recall']:.4f} | {insample_m['accuracy']:.4f} |"
     )
     extra.append(
-        f"| **stack_isotonic_OOF (2차, 정석)** | **{oof_m['f1']:.4f}** | **{oof_m['roc_auc']:.4f}** | "
+        f"| **stack_isotonic_OOF (2nd run, canonical)** | **{oof_m['f1']:.4f}** | **{oof_m['roc_auc']:.4f}** | "
         f"**{oof_m['brier']:.4f}** | **{oof_m['log_loss']:.4f}** | "
         f"{oof_m['precision']:.4f} | {oof_m['recall']:.4f} | {oof_m['accuracy']:.4f} |"
     )
@@ -208,14 +209,14 @@ def patch_report(insample_m: dict, oof_m: dict, raw_m: dict, elapsed_min: float)
     delta_brier = oof_m["brier"] - raw_m["brier"]
     delta_logloss = oof_m["log_loss"] - raw_m["log_loss"]
     extra.append(
-        f"**해석:** 정석 OOF Isotonic 적용 후 Brier {delta_brier:+.4f} / LogLoss {delta_logloss:+.4f}. "
-        "음수면 calibration 이 실제로 효과 있음 (Phase 5 ca-xBA 산출에 권장). "
-        "양수면 stacking 자체가 이미 잘 보정되어 추가 calibration 불요."
+        f"**Interpretation:** After applying canonical OOF Isotonic recalibration — Brier {delta_brier:+.4f} / LogLoss {delta_logloss:+.4f}. "
+        "Negative values indicate that calibration is genuinely effective (recommended for Phase 5 ca-xBA output). "
+        "Positive values indicate the stacking model is already well-calibrated and further recalibration is unnecessary."
     )
     extra.append("")
 
     # Append at end of §6 — insert just before §7
-    marker7 = "\n## 7. 종합 비교"
+    marker7 = "\n## 7. Comprehensive Comparison"
     if marker7 in md:
         idx = md.index(marker7)
         md = md[:idx].rstrip() + "\n\n" + "\n".join(extra) + "\n" + md[idx:]

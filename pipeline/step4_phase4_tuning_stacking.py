@@ -406,53 +406,51 @@ def write_report(
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     brier_comparison = brier_comparison or {}
     L: list[str] = []
-    L.append("# Phase 4 Report — 하이퍼파라미터 튜닝 + Stacking + Isotonic Calibration (오캄의 면도날 적용)")
+    L.append("# Phase 4 Report — Hyperparameter Tuning + Stacking + Isotonic Calibration (Occam's Razor Applied)")
     L.append("")
-    L.append(f"_생성: {now}_  ")
-    L.append("_실행 스크립트: `pipeline/step4_phase4_tuning_stacking.py`_")
+    L.append(f"_Generated: {now}_  ")
+    L.append("_Script: `pipeline/step4_phase4_tuning_stacking.py`_")
     L.append("")
     L.append(
-        "> Phase 2/3 과 **동일한 StratifiedKFold 5-fold CV** 위에서 base 3 모델 "
-        f"(RF / XGB / LGBM) 튜닝된 best estimator 와 Stacking (cv={STACKING_CV}, "
-        "LR meta), **Stacking + Isotonic**, **Best_Single + Isotonic** 의 OOF predict_proba "
-        f"를 평가한다. **OOF Brier 최소 + 오캄의 면도날(ε={occam_eps})** 규칙으로 "
-        "ca-xBA 최종 산출 모델을 선정."
+        "> Evaluates OOF predict_proba of the 3 tuned base models (RF / XGB / LGBM) "
+        f"along with Stacking (cv={STACKING_CV}, LR meta), **Stacking + Isotonic**, and "
+        "**Best_Single + Isotonic** — all on the **same StratifiedKFold 5-fold CV as Phase 2/3**. "
+        f"The ca-xBA final output model is selected by **minimum OOF Brier + Occam's razor (ε={occam_eps})**."
     )
     L.append("")
 
     # 1. Decisions
-    L.append("## 1. 결정 사항 (사용자 컨펌 — Phase 1 dome-masking 이후 분기 전수 재확인)")
+    L.append("## 1. Decision Log (User-Confirmed — All Branches Re-verified After Phase 1 Dome Masking)")
     L.append("")
-    L.append("| # | 결정 항목 | 채택안 | 사유 |")
+    L.append("| # | Decision Item | Adopted Option | Rationale |")
     L.append("|---|---|---|---|")
     L.append(
-        "| 1 | Base 3모델 튜닝 파이프라인 구성 | **RF / XGB / LightGBM 각각 RandomizedSearchCV** "
-        "→ Stacking (LR meta) + Best_Single + Isotonic 후보 평가 | 다양성 base + 메타 학습 + 확률 보정 "
-        "+ 단순 모델까지 4 후보 비교. |"
+        "| 1 | Base 3-model tuning pipeline | **RF / XGB / LightGBM each via RandomizedSearchCV** "
+        "→ evaluate Stacking (LR meta) + Best_Single + Isotonic candidates | Compares 4 candidates: diverse base + meta-learning + probability calibration + simpler model. |"
     )
-    L.append(f"| 2 | RandomizedSearchCV 규모 | **n_iter={N_ITER}, inner_cv={INNER_CV}, scoring='{SCORING}'** | 신뢰도 우선 (사용자 선택). |")
-    L.append(f"| 3 | Outer CV | **StratifiedKFold {CV_FOLDS}-fold (Phase 2/3 동일 random_state={RANDOM_STATE})** | Phase 간 일관성, OOF predict_proba 동일 splits. |")
-    L.append(f"| 4 | 샘플링 | Phase 2 선정 = **`{meta_phase2.get('best_sampling')}`** (원본 분포 유지) | sampler 미사용. 확률 calibration 우선. |")
+    L.append(f"| 2 | RandomizedSearchCV scale | **n_iter={N_ITER}, inner_cv={INNER_CV}, scoring='{SCORING}'** | Reliability first (user choice). |")
+    L.append(f"| 3 | Outer CV | **StratifiedKFold {CV_FOLDS}-fold (same random_state={RANDOM_STATE} as Phase 2/3)** | Cross-phase consistency; identical splits for OOF predict_proba. |")
+    L.append(f"| 4 | Sampling | Phase 2 selection = **`{meta_phase2.get('best_sampling')}`** (preserve original distribution) | No sampler used. Probability calibration takes priority. |")
     L.append(
-        "| 5 | Calibration | **C 옵션 — IsotonicRegression `cv='prefit'` 패턴** "
-        "(Stacking/Best_Single OOF proba 위에 5-fold OOF Isotonic) | 비모수적 단조 보정. "
-        "`CalibratedClassifierCV(cv=5)` 내부 로직과 학술적 동등하며 ~10시간 → ~5초 단축. |"
+        "| 5 | Calibration | **Option C — IsotonicRegression `cv='prefit'` pattern** "
+        "(5-fold OOF Isotonic on top of Stacking/Best_Single OOF proba) | Non-parametric monotonic calibration. "
+        "Academically equivalent to the internals of `CalibratedClassifierCV(cv=5)`; reduces runtime from ~10 hours to ~5 seconds. |"
     )
-    L.append(f"| 6 | Stacking | StackingClassifier(estimators=[best_rf, best_xgb, best_lgbm], final_estimator={STACKING_FINAL_LABEL}, cv={STACKING_CV}) | LR meta — 과적합 위험 낮고 표준. |")
-    L.append("| 7 | 평가 메트릭 | **Brier(주) + LogLoss + F1 + AUC + P + R + Acc** | Phase 2/3 동일. |")
+    L.append(f"| 6 | Stacking | StackingClassifier(estimators=[best_rf, best_xgb, best_lgbm], final_estimator={STACKING_FINAL_LABEL}, cv={STACKING_CV}) | LR meta — low overfitting risk and standard practice. |")
+    L.append("| 7 | Evaluation metrics | **Brier (primary) + LogLoss + F1 + AUC + P + R + Acc** | Identical to Phase 2/3. |")
     L.append(
-        f"| 8 | 모델 선정 기준 | **OOF Brier 최소 + 오캄의 면도날 (ε={occam_eps})** — "
-        f"Best_Single+Iso 와 Stacking+Iso 의 ΔBrier ≤ {occam_eps} 동률 시 더 단순한 Best_Single+Iso 자동 선정 | "
-        "fold 변동 수준 차이는 통계적 노이즈로 간주, 모델 복잡도 최소화. |"
+        f"| 8 | Model selection criterion | **Minimum OOF Brier + Occam's razor (ε={occam_eps})** — "
+        f"if ΔBrier between Best_Single+Iso and Stacking+Iso ≤ {occam_eps} (statistical tie), the simpler Best_Single+Iso is selected automatically | "
+        "Differences within fold variability are treated as statistical noise; model complexity is minimized. |"
     )
-    L.append(f"| 9 | 임계값 | 0.5 고정 | 공정 비교. |")
-    L.append(f"| 10 | M2 발열 관리 | COOLDOWN_SEC={COOLDOWN_SEC}s, N_JOBS={N_JOBS} | Phase 3 의 60s 보다 더 긴 쿨다운 (사용자 명시 — 과열 방지). |")
+    L.append(f"| 9 | Decision threshold | Fixed at 0.5 | Fair comparison. |")
+    L.append(f"| 10 | M2 thermal management | COOLDOWN_SEC={COOLDOWN_SEC}s, N_JOBS={N_JOBS} | Longer cooldown than Phase 3's 60s (user-specified — overheat prevention). |")
     L.append("")
 
     # 2. Base tuning results (fit time column omitted — avoids nan display in RESUME mode)
-    L.append("## 2. Base 모델 튜닝 결과 (RandomizedSearchCV)")
+    L.append("## 2. Base Model Tuning Results (RandomizedSearchCV)")
     L.append("")
-    L.append(f"각 모델 RandomizedSearchCV: n_iter={N_ITER}, inner_cv={INNER_CV}, "
+    L.append(f"RandomizedSearchCV per model: n_iter={N_ITER}, inner_cv={INNER_CV}, "
              f"scoring='{SCORING}', refit=True.")
     L.append("")
     L.append("| Base | best CV Brier | best params |")
@@ -466,7 +464,7 @@ def write_report(
     L.append("")
 
     # 3. Outer CV OOF results
-    L.append(f"## 3. Outer {CV_FOLDS}-fold CV OOF 결과")
+    L.append(f"## 3. Outer {CV_FOLDS}-fold CV OOF Results")
     L.append("")
     L.append("**OOF aggregate:**")
     L.append("")
@@ -495,7 +493,7 @@ def write_report(
     L.append("")
 
     # 4. Improvement over Phase 3 baseline
-    L.append("## 4. Phase 3 baseline (M4=X_advanced+XGB default) 대비 개선")
+    L.append("## 4. Improvement over Phase 3 Baseline (M4 = X_advanced + XGB default)")
     L.append("")
     m4_metrics = next(iter([
         c for c in meta_phase3.get("cells", {}).values()
@@ -516,83 +514,82 @@ def write_report(
         L.append("")
 
     # 5. Final model selection (Occam's Razor)
-    L.append("## 5. 최종 모델 선정 — 오캄의 면도날 (Occam's Razor) 적용")
+    L.append("## 5. Final Model Selection — Occam's Razor Applied")
     L.append("")
-    L.append("### 5.1 핵심 후보 3종 OOF Brier 비교")
+    L.append("### 5.1 OOF Brier Comparison of 3 Key Candidates")
     L.append("")
-    L.append("| 후보 모델 | OOF Brier | 비고 |")
+    L.append("| Candidate Model | OOF Brier | Note |")
     L.append("|---|---:|---|")
     if brier_comparison:
         L.append(
             f"| **{best_single_iso_label}** | **{brier_comparison['best_single_iso']:.5f}** | "
-            f"Best Single (가장 우수했던 단일 base = {best_single_kind.upper()}) + Isotonic "
-            f"— 단순한 모델 |"
+            f"Best Single (top single base = {best_single_kind.upper()}) + Isotonic "
+            f"— simpler model |"
         )
         L.append(
             f"| Stacking + Isotonic | {brier_comparison['stacking_iso']:.5f} | "
-            "Stacking(LR meta) + Isotonic — 복잡한 앙상블 |"
+            "Stacking (LR meta) + Isotonic — complex ensemble |"
         )
         L.append(
             f"| Stacking (LR meta) only | {brier_comparison['stacking_only']:.5f} | "
-            "Stacking 단독 (calibration 없음) |"
+            "Stacking alone (no calibration) |"
         )
         L.append("")
         delta = brier_comparison["delta_best_minus_stack_iso"]
         L.append(
             f"- ΔBrier (Best_Single+Iso − Stacking+Iso) = **{delta:+.5f}** "
-            f"(오캄 threshold ε = {occam_eps})"
+            f"(Occam threshold ε = {occam_eps})"
         )
         L.append("")
-    L.append(f"### 5.2 선정 결과")
+    L.append(f"### 5.2 Selection Result")
     L.append("")
-    L.append(f"- **최종 선정 모델**: `{final_choice}`")
+    L.append(f"- **Final selected model**: `{final_choice}`")
     L.append(f"- **OOF Brier**: **{final_oof_brier:.5f}**")
     L.append("")
-    L.append(f"**자동 선정 사유:** {occam_verdict}")
+    L.append(f"**Automatic selection rationale:** {occam_verdict}")
     L.append("")
-    L.append("### 5.3 학술적 해석 — 왜 오캄의 면도날인가")
+    L.append("### 5.3 Academic Interpretation — Why Occam's Razor")
     L.append("")
     L.append(
-        "실험 결과, **무거운 메타 학습을 거친 Stacking 모델보다 잘 튜닝된 단일 모델"
-        f"({best_single_kind.upper()})의 OOF Brier Score 가 더 우수**함을 확인했다 "
-        "(또는 fold 변동 수준 내에서 동률). 이는 여러 모델을 결합하는 과정에서 오히려 확률 "
-        "보정(probability calibration)이 훼손되는 현상으로 해석할 수 있다 — Stacking 의 "
-        "LR meta-learner 가 base 모델 간 출력 분포 이질성을 강제로 보정하면서 잘 보정된 "
-        "단일 LGBM 의 native calibration 을 흐트러뜨릴 수 있다."
+        "Experiments show that **a well-tuned single model "
+        f"({best_single_kind.upper()}) achieves a lower OOF Brier Score than the Stacking model with heavy meta-learning** "
+        "(or is within a statistical tie at the level of fold variability). "
+        "This can be interpreted as probability calibration being degraded in the process of combining multiple models — "
+        "the LR meta-learner in Stacking, by forcibly reconciling the heterogeneous output distributions of the base models, "
+        "may distort the well-calibrated native calibration of the single-model LightGBM."
     )
     L.append("")
     L.append(
-        "따라서 본 연구는 **\"성능이 비슷하다면 더 단순한 모델이 낫다\"** 는 "
-        "**오캄의 면도날(Occam's Razor)** 원칙을 수용하였다. 억지로 복잡한 앙상블을 "
-        "유지하는 대신, 가장 성능이 뛰어난 단일 모델에 **비모수적 단조 변환인 Isotonic "
-        "Calibration 을 직접 결합**하는 방식을 채택했다. 이를 통해 ① 연산의 복잡도를 "
-        "크게 낮추면서도 (3 base × cross_val_predict + meta-fit + base full-fit 3개 → "
-        "base 1개 full-fit + Isotonic 1개) ② 본 프로젝트의 궁극적 목표인 **'극한의 "
-        "확률 정상도(Calibration)'** 를 성공적으로 확보했다."
+        "This study therefore embraces the **Occam's Razor** principle: **\"if performance is comparable, the simpler model is preferred.\"** "
+        "Rather than artificially maintaining a complex ensemble, we adopt an approach that **directly couples the best-performing single model "
+        "with Isotonic Calibration**, a non-parametric monotonic transformation. "
+        "This simultaneously ① greatly reduces computational complexity "
+        "(3 base × cross_val_predict + meta-fit + 3 base full-fits → 1 base full-fit + 1 Isotonic fit) "
+        "and ② successfully achieves the project's ultimate goal of **extreme probability calibration**."
     )
     L.append("")
     L.append(
-        "이 선정 로직은 결과에 따라 자동으로 분기한다 — 만약 Stacking + Isotonic 의 우위가 "
-        f"ε({occam_eps}) 를 초과한다면 (Brier 차이가 fold 변동 수준을 넘는 통계적 유의 차이), "
-        "복잡도 증가의 정당성이 확보되어 Stacking + Isotonic 이 채택된다. 본 실행에서는 "
-        "위 §5.2 의 자동 선정 결과가 적용되었다."
+        "This selection logic branches automatically based on results — if the advantage of Stacking + Isotonic "
+        f"exceeds ε({occam_eps}) (a statistically significant Brier difference beyond fold variability), "
+        "the added complexity is justified and Stacking + Isotonic is adopted. "
+        "In this run, the automatic selection result from §5.2 above applies."
     )
     L.append("")
     L.append(
-        "- **Phase 5 적용 흐름**: `final_model.joblib` 내부의 base estimator → predict_proba → "
-        "isotonic.predict(proba) → ca-xBA. 2025 데이터(외부 검증 셋)에 그대로 적용."
+        "- **Phase 5 application flow**: base estimator inside `final_model.joblib` → predict_proba → "
+        "isotonic.predict(proba) → ca-xBA. Applied as-is to 2025 data (external validation set)."
     )
     L.append("")
 
     # 6. Outputs
-    L.append("## 6. 산출물")
+    L.append("## 6. Outputs")
     L.append("")
     L.append(
-        f"- `{REPORT_PATH.relative_to(ROOT)}` — 본 리포트\n"
-        f"- `{RESULTS_JSON.relative_to(ROOT)}` — 튜닝 결과·OOF 메트릭·fold records JSON\n"
-        f"- `pipeline/output/phase4_models/` — 최종 모델 joblib + base 3개 best estimator\n"
-        f"- `pipeline/output/phase4_probas/` — 각 모델의 OOF proba npy\n"
-        f"- `pipeline/logs/step4_phase4.log` — 실행 로그"
+        f"- `{REPORT_PATH.relative_to(ROOT)}` — this report\n"
+        f"- `{RESULTS_JSON.relative_to(ROOT)}` — tuning results, OOF metrics, and fold records (JSON)\n"
+        f"- `pipeline/output/phase4_models/` — final model joblib + 3 base best estimators\n"
+        f"- `pipeline/output/phase4_probas/` — OOF proba npy for each model\n"
+        f"- `pipeline/logs/step4_phase4.log` — execution log"
     )
     L.append("")
 

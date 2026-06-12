@@ -56,7 +56,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # -----------------------------------------------------------------------------
 HIT_EVENTS = {"single", "double", "triple", "home_run"}
 BB_TYPES_BIP = {"ground_ball", "fly_ball", "line_drive", "popup"}
-EXCLUDE_TEAMS = {"ATH"}  # Athletics 전체(2024+2025) 분석 제외
+EXCLUDE_TEAMS = {"ATH"}  # Exclude all Athletics games (2024+2025) from analysis
 LAUNCH_ANGLE_ABS_MAX = 60.0
 BAT_TRACKING_COLS = [
     "bat_speed",
@@ -119,7 +119,7 @@ class Attrition:
         print(f"[attrition] {step:<55s} rows={n:>9,d}  (-{removed:,d}) {note}")
 
     def to_markdown(self) -> str:
-        lines = ["| 단계 | 잔여 행 수 | 단계 제거 | 비고 |", "|---|---:|---:|---|"]
+        lines = ["| Step | Remaining Rows | Removed at Step | Note |", "|---|---:|---:|---|"]
         for s in self.steps:
             lines.append(
                 f"| {s['step']} | {s['rows']:,d} | {s['removed_at_step']:,d} | {s['note']} |"
@@ -133,39 +133,39 @@ class Attrition:
 def load_and_clean_statcast(attrition: Attrition) -> pd.DataFrame:
     print("[load] loading statcast CSV...")
     df = pd.read_csv(STATCAST_CSV, low_memory=False)
-    attrition.record("0. 원본 로드", df, note="2024+2025 전체 pitch 단위")
+    attrition.record("0. Raw load", df, note="2024+2025 full dataset, pitch-level")
 
     # BIP filter
     df = df[df["bb_type"].isin(BB_TYPES_BIP)].copy()
     attrition.record(
-        "1. BIP 필터 (bb_type ∈ {ground/fly/line/popup})",
+        "1. BIP filter (bb_type ∈ {ground/fly/line/popup})",
         df,
-        note="옵션 C 채택",
+        note="Option C adopted",
     )
 
     # Exclude Athletics
     df = df[~df["home_team"].isin(EXCLUDE_TEAMS)].copy()
     attrition.record(
-        "2. Athletics(ATH) 홈경기 행 제외",
+        "2. Athletics (ATH) home-game rows excluded",
         df,
-        note="2024 Oakland / 2025 Sacramento 이전 이슈로 분석 제외",
+        note="Excluded from analysis due to 2024 Oakland / 2025 Sacramento relocation issue",
     )
 
     # Remove rows missing core physics features
     core_missing = df["launch_speed"].isna() | df["launch_angle"].isna()
     df = df.loc[~core_missing].copy()
     attrition.record(
-        "3. launch_speed/launch_angle 결측 행 제거",
+        "3. Rows with missing launch_speed/launch_angle removed",
         df,
-        note="xBA 핵심 입력 결측 → 모델링 불가",
+        note="Missing core xBA inputs → cannot be used in modeling",
     )
 
     # Foul-popup cutoff
     df = df[df["launch_angle"].abs() <= LAUNCH_ANGLE_ABS_MAX].copy()
     attrition.record(
-        f"4. |launch_angle| > {LAUNCH_ANGLE_ABS_MAX:.0f}° 컷오프",
+        f"4. |launch_angle| > {LAUNCH_ANGLE_ABS_MAX:.0f}° cutoff",
         df,
-        note="readme 예시 적용 — 파울 팝아웃/극단 음각 라인드라이브 제거",
+        note="Per readme example — foul popups and extreme negative-angle line drives removed",
     )
 
     # Create is_hit target variable
@@ -371,146 +371,147 @@ def write_report(
 ):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = []
-    lines.append("# Phase 1 Report — 데이터 통합, 도메인 기반 전처리 및 연도별 분리")
+    lines.append("# Phase 1 Report — Data Integration, Domain-Driven Preprocessing, and Temporal Split by Season")
     lines.append("")
-    lines.append(f"_생성: {now}_  ")
-    lines.append(f"_실행 스크립트: `pipeline/step1_phase1_preprocessing.py`_")
+    lines.append(f"_Generated: {now}_  ")
+    lines.append(f"_Script: `pipeline/step1_phase1_preprocessing.py`_")
     lines.append("")
-    lines.append("## 1. 서론 요약")
+    lines.append("## 1. Introduction Summary")
     lines.append(
-        "본 단계는 MLB Statcast 타구 데이터(2024~2025), 구장 스펙 데이터, "
-        "Open-Meteo Historical 기상 데이터를 결합하여 후속 모델링의 입력 "
-        "데이터셋을 구성한다. 모든 처리는 도메인 지식과 사용자 승인 결정에 따라 "
-        "수행되며, 데이터 누수(Data Leakage)를 차단하기 위해 game_year 기준으로 "
-        "엄격한 Temporal Split(2024 ↔ 2025)을 실시한다."
+        "This phase combines MLB Statcast batted-ball data (2024–2025), ballpark specification data, "
+        "and Open-Meteo Historical weather data to construct the input dataset for subsequent modeling. "
+        "All processing is performed in accordance with domain knowledge and user-confirmed decisions. "
+        "A strict Temporal Split (2024 ↔ 2025) by game_year is applied to prevent Data Leakage."
     )
     lines.append("")
 
-    lines.append("## 2. 데이터 셋 설명")
+    lines.append("## 2. Dataset Description")
     lines.append(
         "- Statcast: `데이터셋/statcast_bat_tracking_2024_2025.csv` "
-        "(원본 1,443,801행 × 118열, pitch 단위)\n"
-        "- 구장 스펙: `데이터셋/ballparks.csv` (30개 구장 × 15열, "
-        "lat/lon 컬럼은 Phase 1에서 보강)\n"
-        "- 기상: Open-Meteo Archive API `archive-api.open-meteo.com/v1/archive` "
-        "(무료, 키 불요)\n"
-        "- Target 변수 `is_hit`: events ∈ {single, double, triple, home_run} → 1, "
-        "그 외 → 0 (MLB 공식 xBA와 정렬)\n"
-        f"- 최종 전처리 후 안타율 = {hit_rate_overall:.4f}"
+        "(raw 1,443,801 rows × 118 columns, pitch-level)\n"
+        "- Ballpark specs: `데이터셋/ballparks.csv` (30 ballparks × 15 columns; "
+        "lat/lon columns added in Phase 1)\n"
+        "- Weather: Open-Meteo Archive API `archive-api.open-meteo.com/v1/archive` "
+        "(free, no API key required)\n"
+        "- Target variable `is_hit`: events ∈ {single, double, triple, home_run} → 1, "
+        "all others → 0 (aligned with MLB official xBA definition)\n"
+        f"- Hit rate after final preprocessing = {hit_rate_overall:.4f}"
     )
     lines.append("")
 
-    lines.append("## 3. 결정 사항(분기점 기록)")
-    lines.append("사용자 컨펌으로 확정된 분석 결정.")
+    lines.append("## 3. Decision Log (Branching Points)")
+    lines.append("Analysis decisions confirmed by the user.")
     lines.append("")
-    lines.append("| # | 결정 항목 | 채택안 | 사유 / 영향 |")
+    lines.append("| # | Decision Item | Adopted Option | Rationale / Impact |")
     lines.append("|---|---|---|---|")
     lines.append(
-        "| 1 | BIP(인플레이 타구) 정의 | `bb_type ∈ {ground_ball, fly_ball, line_drive, popup}` (옵션 C) | "
-        "가장 보수적 정의 — 타구 추적이 확실한 행만 사용. 안타율 계산 분모가 깨끗함. |"
+        "| 1 | BIP (ball-in-play) definition | `bb_type ∈ {ground_ball, fly_ball, line_drive, popup}` (Option C) | "
+        "Most conservative definition — only rows with confirmed batted-ball tracking. Clean denominator for hit-rate calculation. |"
     )
     lines.append(
-        "| 2 | Target `is_hit` 정의 | `events ∈ {single, double, triple, home_run}` → 1 (옵션 A) | "
-        "MLB 공식 xBA 정의와 동일. Phase 5의 ca-xBA vs xBA 비교 일관성 확보. sac_fly/field_error 등은 0. |"
+        "| 2 | Target `is_hit` definition | `events ∈ {single, double, triple, home_run}` → 1 (Option A) | "
+        "Identical to MLB official xBA definition. Ensures consistency for ca-xBA vs xBA comparison in Phase 5. sac_fly/field_error etc. are 0. |"
     )
     lines.append(
-        "| 3 | 핵심 물리 결측(launch_speed/angle NaN) 처리 | 행 제거 (옵션 A) | "
-        "xBA는 launch_speed×launch_angle 함수 — 결측 시 모델 입력 불가. "
-        f"전체 BIP의 1.2% (약 3K행) 손실은 미미. |"
+        "| 3 | Missing core physics (launch_speed/angle NaN) handling | Drop rows (Option A) | "
+        "xBA is a function of launch_speed × launch_angle — rows with missing values cannot be used in modeling. "
+        f"Loss of ~1.2% of total BIP (~3K rows) is negligible. |"
     )
     lines.append(
-        "| 4 | `|launch_angle| > 60°` 컷오프 | 채택 (옵션 A) | "
-        "readme 예시 그대로. 파울 팝아웃·극단 음각 라인드라이브를 노이즈로 제거. "
-        "popup의 평균 la=65.8°, 안타율 1.4%로 대부분 제거됨. |"
+        "| 4 | `|launch_angle| > 60°` cutoff | Applied (Option A) | "
+        "Follows readme example exactly. Removes foul popups and extreme negative-angle line drives as noise. "
+        "Popup mean la=65.8°, hit rate 1.4% — nearly all removed. |"
     )
     lines.append(
-        "| 5 | launch_speed 하한 컷오프 | 컷오프 없음 (옵션 A) | "
-        "약타도 실제 BIP의 일부이며 xBA 정의에 포함. 인위적 절단은 정보 손실. |"
+        "| 5 | launch_speed lower-bound cutoff | No cutoff (Option A) | "
+        "Weak contact is part of real BIP and included in the xBA definition. Artificial truncation loses information. |"
     )
     lines.append(
-        "| 6 | 배트 트래킹 변수 결측 처리 | NaN 유지 + `*_is_missing` 플래그 추가 (옵션 B) | "
-        "2024 11.46% / 2025 5.21% 결측은 시즌 초반 비공개 구간 때문. "
-        "트리 모델 NaN-native 처리 활용, 결측 패턴 자체를 신호로 보존. |"
+        "| 6 | Bat-tracking variable missingness handling | Retain NaN + add `*_is_missing` flags (Option B) | "
+        "2024 11.46% / 2025 5.21% missingness is due to withheld data at the start of each season. "
+        "Exploits NaN-native handling of tree models; preserves missingness pattern itself as a signal. |"
     )
     lines.append(
-        "| 7 | Athletics(ATH) 매핑 | 2024+2025 ATH 홈경기 전체 분석 제외 (옵션 D) | "
-        "2025년 홈구장이 Oakland Coliseum → Sutter Health Park(새크라멘토)로 이전 — "
-        "환경 변수가 완전히 달라 단일 매핑 불가. 8,641행(BIP의 3.4%) 손실 감수. |"
+        "| 7 | Athletics (ATH) mapping | Exclude all 2024+2025 ATH home-game rows from analysis (Option D) | "
+        "Home ballpark relocated from Oakland Coliseum → Sutter Health Park (Sacramento) in 2025 — "
+        "environmental variables are entirely different; single mapping is not feasible. Accepts 8,641-row loss (3.4% of BIP). |"
     )
     lines.append(
-        "| 8 | 구장 위·경도 추가 방식 | ballparks.csv 자체에 lat/lon 컬럼 추가 (옵션 B) | "
-        "데이터셋 자체 완성도. 공개 좌표(MLB 공식/Wikipedia) 하드코딩 입력. |"
+        "| 8 | Ballpark lat/lon addition method | Add lat/lon columns directly to ballparks.csv (Option B) | "
+        "Improves dataset self-completeness. Coordinates hard-coded from publicly available sources (MLB official/Wikipedia). |"
     )
     lines.append(
-        "| 9 | 기상 API 시점 처리 | `daytime ≥ 0.5` → 13:00 / 그 외 → 19:00 현지시각 snapshot (옵션 D) | "
-        "first-pitch 시각 부재. ballparks.csv의 daytime 비율로 구장별 분기. "
-        "낮경기·야간경기 평균 시점 근사. |"
+        "| 9 | Weather API snapshot time | `daytime ≥ 0.5` → 13:00 / otherwise → 19:00 local-time snapshot (Option D) | "
+        "No first-pitch time available. Park-level branching via the daytime ratio in ballparks.csv. "
+        "Approximates average start time for day/night games. |"
     )
     lines.append(
-        "| 10 | 기상 변수 셋 | 8종(temperature, humidity, surface_pressure, wind_speed, wind_direction, "
-        "precipitation, cloud_cover, wind_gusts) (옵션 C) | "
-        "공기 밀도(온·습·압) + 바람(속·향·돌풍) + 경기 영향(강수·운량) 모두 커버. "
-        "다중공선성은 Phase 2에서 정리. |"
+        "| 10 | Weather variable set | 8 variables (temperature, humidity, surface_pressure, wind_speed, wind_direction, "
+        "precipitation, cloud_cover, wind_gusts) (Option C) | "
+        "Covers air density (temperature/humidity/pressure) + wind (speed/direction/gusts) + in-game effects (precipitation/cloud cover). "
+        "Multicollinearity to be addressed in Phase 2. |"
     )
     lines.append(
-        "| 11 | 돔/지붕 닫힘 경기 기상 마스킹 | **MLB Stats API 경기별 `weather.condition` 기반 정밀 마스킹** — "
-        "closed 경기에서 외부 5종(wind_speed/gusts/direction · precipitation · cloud_cover) = 0, "
-        "실내 2종(temperature_2m=22°C · relative_humidity_2m=50%) = 공조 표준값, surface_pressure 그대로 | "
-        "도메인 사실 \"돔에서는 외부 기상이 안타 확률에 영향을 줄 수 없다\" 를 학습 데이터에 *직접* 반영. "
-        "단순 roof 컬럼(0~1 시즌 평균)만으로는 트리 모델이 *조건부 무력화 split* 을 학습하지 못함을 사후 검증. "
-        "공기 밀도(기온·습·압) 보존 + 외부 직접 기상 무력화 분리 적용. |"
+        "| 11 | Dome / roof-closed game weather masking | **Per-game precision masking via MLB Stats API `weather.condition`** — "
+        "for closed games: 5 outdoor variables (wind_speed/gusts/direction · precipitation · cloud_cover) = 0, "
+        "2 indoor variables (temperature_2m=22°C · relative_humidity_2m=50%) = HVAC standard values, surface_pressure unchanged | "
+        "Directly encodes the domain fact that outdoor weather cannot affect hit probability inside a dome. "
+        "Post-hoc validation confirmed that the simple roof column (0–1 seasonal average) alone cannot teach tree models a conditional-nullification split. "
+        "Air density (temperature/humidity/pressure) preserved; outdoor weather effects neutralized separately. |"
     )
     lines.append("")
 
-    lines.append("## 4. 단계별 attrition (행 수 변화)")
+    lines.append("## 4. Per-Step Attrition (Row Count Changes)")
     lines.append(attrition.to_markdown())
     lines.append("")
 
-    lines.append("## 5. BIP 필터 직후 bb_type 분포")
+    lines.append("## 5. bb_type Distribution Immediately After BIP Filter")
     lines.append("```")
     lines.append(str(bb_type_dist_before))
     lines.append("```")
     lines.append("")
 
-    lines.append("## 6. 배트 트래킹 결측률 (전처리 직전 BIP 기준, 연도별)")
+    lines.append("## 6. Bat-Tracking Missingness Rates (BIP rows before preprocessing, by season)")
     lines.append(bat_missing_rates.round(4).to_markdown())
     lines.append("")
 
-    lines.append("## 7b. 돔/지붕 닫힘 경기 기상 마스킹 (결정 #11)")
+    lines.append("## 7b. Dome / Roof-Closed Game Weather Masking (Decision #11)")
     lines.append("")
     lines.append(
-        f"- MLB Stats API (`/api/v1.1/game/{{game_pk}}/feed/live` 의 `gameData.weather.condition`)에서 "
-        f"\"Roof Closed\" 또는 \"Dome\" 으로 명시된 경기에 한해 기상 변수 마스킹 적용.\n"
-        f"- 캐시 파일: `pipeline/cache/mlb_roof_status_cache.json` (1,318 게임, 누락 0건).\n"
-        f"- 마스킹된 BIP 행: **{n_dome_masked:,d}** / 대상 가능(retractable + TB) **{n_dome_eligible:,d}** "
+        f"- Weather masking applied only to games for which the MLB Stats API "
+        f"(`/api/v1.1/game/{{game_pk}}/feed/live` → `gameData.weather.condition`) "
+        f"explicitly records \"Roof Closed\" or \"Dome\".\n"
+        f"- Cache file: `pipeline/cache/mlb_roof_status_cache.json` (1,318 games, 0 missing).\n"
+        f"- Masked BIP rows: **{n_dome_masked:,d}** / eligible (retractable + TB) **{n_dome_eligible:,d}** "
         f"({n_dome_masked / max(n_dome_eligible, 1) * 100:.1f}%)\n"
-        f"- 적용 값:\n"
-        f"  - 외부 기상 5종 → 0: `wx_wind_speed_10m`, `wx_wind_gusts_10m`, `wx_wind_direction_10m`, "
+        f"- Values applied:\n"
+        f"  - 5 outdoor weather variables → 0: `wx_wind_speed_10m`, `wx_wind_gusts_10m`, `wx_wind_direction_10m`, "
         f"`wx_precipitation`, `wx_cloud_cover`\n"
-        f"  - 실내 공조 표준값 2종: `wx_temperature_2m` = 22°C (MLB 돔 표준), "
-        f"`wx_relative_humidity_2m` = 50% (ASHRAE 권장 중간값)\n"
-        f"  - 변경 없음: `wx_surface_pressure` (실내·외 기압 동일)\n"
-        f"- 도메인 의의: 트리 앙상블 모델이 *roof × 기상 상호작용* 을 자동 학습할 수 있도록, "
-        f"학습 데이터에 \"돔 경기에서는 기상 변수가 상수\" 라는 사실을 직접 주입."
+        f"  - 2 indoor HVAC standard values: `wx_temperature_2m` = 22°C (MLB dome standard), "
+        f"`wx_relative_humidity_2m` = 50% (midpoint of ASHRAE-recommended range)\n"
+        f"  - Unchanged: `wx_surface_pressure` (indoor and outdoor air pressure are equal)\n"
+        f"- Domain significance: directly injects into the training data the fact that "
+        f"weather variables are constant in dome games, enabling tree ensemble models to "
+        f"automatically learn the *roof × weather interaction*."
     )
     lines.append("")
 
-    lines.append("## 7. 기상 데이터 병합 결과")
+    lines.append("## 7. Weather Data Merge Results")
     lines.append(
-        f"- 호출 구장 수: {parks_used} (Athletics 제외)\n"
-        f"- 호출 변수: {', '.join(WEATHER_HOURLY_VARS)} (총 {len(WEATHER_HOURLY_VARS)}종)\n"
-        f"- 시점: daytime≥0.5 → 13:00 현지시각 / 그 외 → 19:00 현지시각\n"
-        f"- 캐시: `pipeline/cache/weather_{{team}}_{{start}}_{{end}}.json`\n"
-        f"- 기상 결측 행: {n_weather_missing:,d} / {n_weather_total:,d} "
+        f"- Ballparks queried: {parks_used} (Athletics excluded)\n"
+        f"- Variables fetched: {', '.join(WEATHER_HOURLY_VARS)} (total {len(WEATHER_HOURLY_VARS)})\n"
+        f"- Snapshot time: daytime≥0.5 → 13:00 local time / otherwise → 19:00 local time\n"
+        f"- Cache: `pipeline/cache/weather_{{team}}_{{start}}_{{end}}.json`\n"
+        f"- Rows with missing weather: {n_weather_missing:,d} / {n_weather_total:,d} "
         f"({n_weather_missing / max(n_weather_total, 1) * 100:.2f}%)"
     )
     lines.append("")
-    lines.append("### 기상 변수 요약 통계")
+    lines.append("### Weather Variable Summary Statistics")
     lines.append(weather_summary.round(2).to_markdown())
     lines.append("")
 
-    lines.append("## 8. Temporal Split 결과")
-    lines.append("| 연도 | 행 수 | 안타율 | 타자 수 | 투수 수 | 구장 수 | 기간 | 저장 경로 |")
+    lines.append("## 8. Temporal Split Results")
+    lines.append("| Season | Rows | Hit Rate | Batters | Pitchers | Ballparks | Period | Output Path |")
     lines.append("|---:|---:|---:|---:|---:|---:|---|---|")
     for yr, info in sorted(split_info.items()):
         lines.append(
@@ -519,14 +520,14 @@ def write_report(
             f"{info['date_min']}~{info['date_max']} | `{info['path']}` |"
         )
     lines.append("")
-    lines.append("- 2024_data 는 Phase 2~4 학습/평가용, 2025_data 는 Phase 5 검증 정답지용으로 격리.")
+    lines.append("- 2024_data is reserved for Phase 2–4 training/evaluation; 2025_data is held out as the Phase 5 validation ground truth.")
     lines.append("")
 
-    lines.append("## 9. 산출물 파일 목록")
+    lines.append("## 9. Output File List")
     lines.append(
         "- `pipeline/output/2024_data.parquet`\n"
         "- `pipeline/output/2025_data.parquet`\n"
-        "- `pipeline/cache/weather_<team>_<start>_<end>.json` (구장별 Open-Meteo raw 응답 캐시)"
+        "- `pipeline/cache/weather_<team>_<start>_<end>.json` (per-ballpark Open-Meteo raw response cache)"
     )
     lines.append("")
 
